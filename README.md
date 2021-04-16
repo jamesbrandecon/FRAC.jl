@@ -15,7 +15,7 @@ DataFrameRow
 With this data, one can estimate FRAC and calculate own-price elasticities using 
 ```jl
 results = estimateFRAC(data = df, linear= "prices", nonlinear = "prices", se_type = "robust")
-own_price_elasticities = price_elasticities(frac_results = results, data = df, linear = "prices", nonlinear = "prices + x", which = "own") 
+own_price_elasticities = price_elasticities(frac_results = results, data = df, linear = "prices", nonlinear = "prices", which = "own") 
 ```
 It is important to note that, currently, you have to restate some options in `price_elasticities` (i.e. `results` does not include information about the specification. 
 
@@ -27,8 +27,34 @@ I have added a few additional options in `estimateFRAC`:
 
 ## Helper functions
 For situations in which one is estimating many `FRAC` models at once, two helpful functions (examples shown in `examples/example1.jl` are:
+
 `plotFRACResults(df; frac_results = [], var = "prices", param = "mean", plot = "hist", by_var = "")`: This plots either a "hist" or a "scatter" plot of all model estimates. If `param = "mean"`, this returns estimates of the mean preferences for characteristic `var`. If `param` is set to anything else, it returns estiamtes of the variance of preferences for `var`.
 
 `extractEstimates(df;frac_results = [], var = "prices", param = "mean", by_var = "")`: For more complicated plots or when the researcher wants to examine the results of `estimateFRAC`, this returns estimated coefficients directly as arrays. For now it only returns standard errors for the unconstrained case, though I may add GMM standard errors for the constrained cases soon. 
 
+# Timing an Example
+Here is a snippet of the example contained in `examples/example1.jl`
+First, I use `FRAC.simulate_logit` to simulate demand for 40000 markets with differing numbers of goods per market 
+```jl
+T = 20000;
+s,p,z,x = simulate_logit(2,T,[-0.4 0.1], [0.5 0.5], 0.3);
+s2,p2,z2,x2 = simulate_logit(4,T,[-0.4 0.1], [0.5 0.5], 0.3);
+```
+This simulates mixed logit (BLP) demand data in which there are two product characteristics `prices` and `x` for which consumers have heterogeneous preferences. I then convert this data to a DataFrame `df` (see example file), define a column `by_example` which randomly divides markets into one of 100 separate regions, and add a variable `dummyFE` which is a meaningess fixed effect simply for demonstration purposes. To estimate 100 separate FRAC models, we can run  
+
+```jl 
+julia> @time results = estimateFRAC(data = df, linear= "prices + x", nonlinear = "prices + x",
+           by_var = "by_example", fes = "product_ids + dummy_FE",
+           se_type = "robust", constrained = true)
+Progress: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| Time: 0:00:18
+ 39.046212 seconds (115.15 M allocations: 11.935 GiB, 5.30% gc time, 0.01% compilation time)
+```
+Note that here `constrained = true`. So, 100 constrained estimates with two dimenions of FEs takes less than a minute! Note that the progress bar tells how long the command actually spent in estimation, which is only 18 seconds. Unconstrained results are even faster: 
+```jl
+@time results = estimateFRAC(data = df, linear= "prices + x", nonlinear = "prices + x",
+           by_var = "by_example", fes = "product_ids + dummy_FE",
+           se_type = "robust", constrained = false)
+Progress: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| Time: 0:00:07
+  7.643048 seconds (14.19 M allocations: 1.035 GiB, 2.75% gc time, 90.89% compilation time)
+```
 
