@@ -2,7 +2,7 @@ using LinearAlgebra, Statistics
 using BenchmarkTools
 using Plots, DataFrames
 
-using Main.FRAC
+using FRAC
 
 Plots.theme(:ggplot2) # Change Plots.jl theme
 
@@ -58,7 +58,7 @@ df[!,"dummy_FE"] = (df.dummy_FE .> 0.5);
 # All models include two dimensions of random coefficients and two fixed effects
 @time results = estimateFRAC(data = df, linear= "prices + x", nonlinear = "prices + x",
     by_var = "by_example", fes = "product_ids + dummy_FE",
-    se_type = "robust", constrained = true)
+    se_type = "robust", constrained = false)
 @time own_elast = price_elasticities(frac_results = results, data = df,
     linear = "prices + x", nonlinear = "prices + x", which = "own",
     by_var="by_example")
