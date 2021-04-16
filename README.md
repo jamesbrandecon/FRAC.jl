@@ -17,7 +17,7 @@ With this data, one can estimate FRAC and calculate own-price elasticities using
 results = estimateFRAC(data = df, linear= "prices", nonlinear = "prices", se_type = "robust")
 own_price_elasticities = price_elasticities(frac_results = results, data = df, linear = "prices", nonlinear = "prices", which = "own") 
 ```
-It is important to note that, currently, you have to restate some options in `price_elasticities` (i.e. `results` does not include information about the specification. 
+It is important to note that, (1) currently, you have to restate some options in `price_elasticities` (i.e. `results` does not include information about the specification) and (2) Although `estimateFRAC` is agnostic about the distribution of random coefficients, `price_elasticities` assumes that all random coefficients are normally distributed, as is standard. 
 
 ## Additional options
 I have added a few additional options in `estimateFRAC`: 
