@@ -45,8 +45,6 @@ cdf = select(cdf, Not(:market_ids_sum));
 sums = innerjoin(select(df, :market_ids), cdf, on = :market_ids);
 df[!,"demand_instruments3"] = (df.demand_instruments0 - sums.demand_instruments0_sum).^2;
 df[!,"demand_instruments4"] = (df.x - sums.x_sum).^2;
-df[!,"demand_instruments5"] = (df.demand_instruments1 - sums.demand_instruments1_sum).^2;
-df[!,"demand_instruments6"] = (df.demand_instruments2 - sums.demand_instruments2_sum).^2;
 
 df[!,"dummy_FE"] .= rand();
 df[!,"dummy_FE"] = (df.dummy_FE .> 0.5);
