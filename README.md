@@ -31,9 +31,11 @@ It is important to note that, (1) currently, you have to restate some options in
 ## Additional options
 I have added a few additional options in `estimateFRAC`: 
 - `by_var`: Name (as a string) of a variable denoting different (e.g. geographic) regions in which FRAC should be estimated separately. 
+- `product`: When calculating cross-price elasticities, currently you have to set `which = "cross"` and set `product` equal to the `product_ids` value of the product of interest. `price_elasticities` will then return all cross-price elasticities of each observation with respect to `product` (or zero in markets which do not contain `product`). 
 - `constrained`: Boolean variable determining whether the to constrain (1) estimates of the mean preferences for price to be negative and (2) all estiamtes of the variance of random coefficients to be positive. 
 - `fes`: String denoting up to two dimensions of fixed effects. E.g. to absorb `fe1` and `fe2`, set `fes = "fe1 + fe2"`.
-
+- `cluster_var`: when `se_type = "cluster"`, you must also set `cluster_var` equal to the variable on which you want to cluster standard errors. 
+   
 ## Helper functions
 For situations in which one is estimating many `FRAC` models at once, two helpful functions (examples shown in `examples/example1.jl` are:
 
