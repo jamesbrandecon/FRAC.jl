@@ -1,6 +1,13 @@
 # FRAC.jl
 This package estimates mixed logit demand models using the fast, "robust", and approximately correct (FRAC) approach developed by Salanie and Wolak (2019). The current version of the code 
 
+## Installation
+I may continue to add things to the package and there may be some bugs remaining, so for now install directly from Github: 
+```jl
+using Pkg
+Pkg.add(url = "https://github.com/jamesbrandecon/FRAC.jl")
+```
+
 ## Basic Usage
 FRAC.jl requires a DataFrame as input which contains columns `shares`, `market_ids`, `product_ids`, `demand_instruments` (numbered from 0) and any relevant product characteristics. A minimal example, in which price is the only characteristic, would look like: 
 ```jl
@@ -57,4 +64,7 @@ Note that here `constrained = true`. So, 100 constrained estimates with two dime
 Progress: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| Time: 0:00:07
   7.643048 seconds (14.19 M allocations: 1.035 GiB, 2.75% gc time, 90.89% compilation time)
 ```
-
+## To-do
+- Add wild bootstrap-based de-biasing from Salanie and Wolak (2019) 
+- Allow for log-normal distributions for random coefficients 
+- Add options for (random coefficient) nested logit 
