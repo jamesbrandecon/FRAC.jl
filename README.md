@@ -1,4 +1,6 @@
 # FRAC.jl
+The package is brand new! Consider it a beta version, and let me know if you encounter issues. 
+
 This package estimates mixed logit demand models using the fast, "robust", and approximately correct (FRAC) approach developed by Salanie and Wolak (2019). The current version of the code 
 
 ## Installation
