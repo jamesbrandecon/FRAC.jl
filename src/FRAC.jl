@@ -455,7 +455,7 @@ function own_price_elasticities(data::DataFrame, linear_vars,
         end
     end
     u_i = exp.(u_i);
-    u_i = DataFrame(u_i);
+    u_i = DataFrame(u_i, :auto);
     u_i[!,"market_ids"] = data.market_ids;
 
     # Calculate market-level sums of exp(u)
@@ -503,7 +503,7 @@ function own_price_elasticities(data::DataFrame, linear_vars,
         end
     end
     u_i = exp.(u_i);
-    u_i = DataFrame(u_i);
+    u_i = DataFrame(u_i, :auto);
     u_i[!,"market_ids"] = data.market_ids;
 
     # Calculate market-level sums of exp(u)
@@ -551,7 +551,7 @@ function cross_elasticities(data::DataFrame, linear_vars,
         end
     end
     u_i = exp.(u_i);
-    u_i = DataFrame(u_i);
+    u_i = DataFrame(u_i, :auto);
     u_i[!,"market_ids"] = data.market_ids;
 
     # Calculate market-level sums of exp(u)
@@ -614,7 +614,7 @@ function cross_elasticities(data::DataFrame, linear_vars,
         end
     end
     u_i = exp.(u_i);
-    u_i = DataFrame(u_i);
+    u_i = DataFrame(u_i, :auto);
     u_i[!,"market_ids"] = data.market_ids;
 
     # Calculate market-level sums of exp(u)
