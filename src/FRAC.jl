@@ -465,7 +465,7 @@ function own_price_elasticities(data::DataFrame, linear_vars,
 
     # Make a DataFrame with only market-level sums
     u_sums = innerjoin(select(u_i, :market_ids), cdf, on = :market_ids);
-    shares_i = convert(Array{Float64,2},u_i[!,r"x"])./ convert(Array{Float64,2},(1 .+ u_sums[!,r"x"]));
+    shares_i = Matrix(u_i[!,r"x"])./ Matrix(1 .+ u_sums[!,r"x"]);
 
     price_index = findall(x-> x=="prices", coefnames(results));
     price_var_index = findall(x-> x=="K_prices", coefnames(results));
@@ -513,7 +513,7 @@ function own_price_elasticities(data::DataFrame, linear_vars,
 
     # Make a DataFrame with only market-level sums
     u_sums = innerjoin(select(u_i, :market_ids), cdf, on = :market_ids);
-    shares_i = convert(Array{Float64,2},u_i[!,r"x"])./ convert(Array{Float64,2},(1 .+ u_sums[!,r"x"]));
+    shares_i = Matrix(u_i[!,r"x"])./ Matrix(1 .+ u_sums[!,r"x"]);
 
     price_index = findall(x-> x=="prices", linear_vars);
     price_var_index = findall(x-> x=="prices", nonlinear_vars)[1] + num_lin;
@@ -583,7 +583,7 @@ function cross_elasticities(data::DataFrame, linear_vars,
             u_sums_m = u_sums[u_sums.market_ids .==m,:];
 
             # Getting market-specific shares
-            shares_i = convert(Array{Float64,2},u_i_m[!,r"x"])./ convert(Array{Float64,2},(1 .+ u_sums_m[!,r"x"]));
+            shares_i = Matrix(u_i_m[!,r"x"])./ Matrix(1 .+ u_sums_m[!,r"x"]);
 
             elast_m = df_m.prices ./ df_m[prod_ind,"shares"] .* mean(-1 .* alpha_i .* shares_i .* shares_i[prod_ind,:],dims=2);
             elast_m[prod_ind] = df_m[prod_ind,"prices"] ./ df_m[prod_ind,"shares"] .* mean(alpha_i .* shares_i[prod_ind,:] .* (1 .- shares_i[prod_ind,:]),dims=2);
@@ -641,7 +641,7 @@ function cross_elasticities(data::DataFrame, linear_vars,
             u_sums_m = u_sums[u_sums.market_ids .==m,:];
 
             # Getting market-specific shares
-            shares_i = convert(Array{Float64,2},u_i_m[!,r"x"])./ convert(Array{Float64,2},(1 .+ u_sums_m[!,r"x"]));
+            shares_i = Matrix(u_i_m[!,r"x"])./ Matrix(1 .+ u_sums_m[!,r"x"]);
 
             elast_m = df_m.prices ./ df_m[prod_ind,"shares"] .* mean(-1 .* alpha_i .* shares_i .* shares_i[prod_ind,:],dims=2);
             elast_m[prod_ind] = df_m[prod_ind,"prices"] ./ df_m[prod_ind,"shares"] .* mean(alpha_i .* shares_i[prod_ind,:] .* (1 .- shares_i[prod_ind,:]),dims=2);
