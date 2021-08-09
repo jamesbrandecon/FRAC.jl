@@ -191,13 +191,13 @@ function FRAC_gmm(;data::DataFrame, linear_vars = "", nonlinear_vars = "",
         # When reg() drops singletons, some residuals are missing
         # so I need to drop any rows w/ missing values of anything residualized
         for residual_var = linear_vars
-            data_b = data_b[.! isequal.(Array(data_b[!,residual_var]), missing),:];
+            data = data[.! isequal.(Array(data[!,residual_var]), missing),:];
         end
         for residual_var = nonlinear_vars
-            data_b = data_b[.! isequal.(Array(data_b[!,string("K_",residual_var)]), missing),:];
+            data = data[.! isequal.(Array(data[!,string("K_",residual_var)]), missing),:];
         end
         for residual_var = iv_names
-            data_b = data_b[.! isequal.(Array(data_b[!,residual_var]), missing),:];
+            data = data[.! isequal.(Array(data[!,residual_var]), missing),:];
         end
 
         # lower is -INF for all linear
