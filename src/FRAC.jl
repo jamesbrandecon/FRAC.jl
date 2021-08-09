@@ -673,10 +673,16 @@ function price_elasticities(;frac_results = [], data::DataFrame,
     nonlinear_vars = replace.(temp_nonlin, " " => "");
     NL = maximum(size(nonlinear_vars));
 
+    if by_var ==""
+        result_for_type_check = frac_results;
+    else
+        result_for_type_check = frac_results[1];
+    end
+
     # Find which covariate corresponds to price
-    if typeof(frac_results[1]) == FixedEffectModel
-        price_index = findall(x-> x=="prices", coefnames(frac_results[1]));
-        price_var_index = findall(x-> x=="K_prices", coefnames(frac_results[1]));
+    if typeof(result_for_type_check) == FixedEffectModel
+        price_index = findall(x-> x=="prices", coefnames(result_for_type_check));
+        price_var_index = findall(x-> x=="K_prices", coefnames(result_for_type_check));
     else
         num_lin = length(linear_vars);
         price_index = findall(x-> x=="prices", linear_vars);
@@ -684,27 +690,40 @@ function price_elasticities(;frac_results = [], data::DataFrame,
     end
     mixed_logit = price_var_index !=[];
 
-    if which == "own"
-        output = zeros(size(data,1),1);
-        by_var_values = unique(data[!,by_var]);
-        for b = by_var_values
-            i = findfirst(x->x==b, by_var_values);
-                own = own_price_elasticities(data[data[!,by_var].==b,:], linear_vars,
-                    nonlinear_vars, frac_results[i], I = monte_carlo_draws)
-            output[data[!,by_var].==b,:] = own;
+    if by_var ==""
+        if which == "own"
+            own = own_price_elasticities(data, linear_vars,
+                nonlinear_vars, frac_results, I = monte_carlo_draws)
+            output = own;
+        else
+            cross_elast = cross_elasticities(data, linear_vars,
+                nonlinear_vars, frac_results, I = monte_carlo_draws, product = product)
+            output = cross_elast;
         end
     else
-        # Calculate cross-price elasticities
-        # have to be very careful to call correct products
-        output = zeros(size(data,1),1);
-        by_var_values = unique(data[!,by_var]);
-        for b = by_var_values
-            i = findfirst(x->x==b, by_var_values);
-            cross_elast = cross_elasticities(data[data[!,by_var].==b,:], linear_vars,
-                nonlinear_vars, frac_results[i], I = monte_carlo_draws, product = product)
-            output[data[!,by_var].==b,:] = cross_elast;
+        if which == "own"
+            output = zeros(size(data,1),1);
+            by_var_values = unique(data[!,by_var]);
+            for b = by_var_values
+                i = findfirst(x->x==b, by_var_values);
+                    own = own_price_elasticities(data[data[!,by_var].==b,:], linear_vars,
+                        nonlinear_vars, frac_results[i], I = monte_carlo_draws)
+                output[data[!,by_var].==b,:] = own;
+            end
+        else
+            # Calculate cross-price elasticities
+            # have to be very careful to call correct products
+            output = zeros(size(data,1),1);
+            by_var_values = unique(data[!,by_var]);
+            for b = by_var_values
+                i = findfirst(x->x==b, by_var_values);
+                cross_elast = cross_elasticities(data[data[!,by_var].==b,:], linear_vars,
+                    nonlinear_vars, frac_results[i], I = monte_carlo_draws, product = product)
+                output[data[!,by_var].==b,:] = cross_elast;
+            end
         end
     end
+
     return output
 end
 
