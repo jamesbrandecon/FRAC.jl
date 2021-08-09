@@ -68,6 +68,33 @@ Note that here `constrained = true`. So, 100 constrained estimates with two dime
 Progress: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| Time: 0:00:07
   7.643048 seconds (14.19 M allocations: 1.035 GiB, 2.75% gc time, 90.89% compilation time)
 ```
+
+## Usage in R
+The package is only really meant to be run in Julia, but I've had recent luck using JuliaConnectoR to use FRAC and other Julia packages in R. To use this, you need to have Julia installed, and then in R run: 
+```r
+install.packages("JuliaConnectoR")
+library("JuliaConnectoR")
+juliaEval('using Pkg')
+juliaEval('Pkg.add(PackageSpec(url = "https://github.com/jamesbrandecon/FRAC.jl"))')
+juliaEval('Pkg.add("DataFrames")')
+```
+These commands install the necessary packages for the following simple example and only need to be run once. Then, after importing your own data as a data.frame called `r_data` with the necessary columns, you can use FRAC directly in R!: 
+```r
+FRAC <- juliaImport("FRAC")
+juliaEval("using DataFrames")
+jl_data <- juliaLet('DataFrames.DataFrame(data);', data = r_data)
+jl_data <- juliaLet('data[!,"by_example"] .=mod.(data.market_ids,2);
+                   data', data = jl_data);
+results <- FRAC$estimateFRAC(data = jl_data, linear= "prices + x", nonlinear = "prices + x",
+                            by_var = "by_example", fes = "product_ids",
+                            se_type = "robust", constrained = F)
+
+own_elasticities <- FRAC$price_elasticities(frac_results = results, data = jl_data,
+                            linear = "prices + x", nonlinear = "prices + x", which = "own",
+                            by_var = "by_example")
+```
+You can see that the syntax here to run FRAC is identical to that of `example1.jl`.  
+
 ## To-do
 - Add wild bootstrap-based de-biasing from Salanie and Wolak (2019) 
 - Allow for log-normal distributions for random coefficients 
