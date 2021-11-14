@@ -3,6 +3,8 @@ The package is brand new! Consider it a beta version, and let me know if you enc
 
 This package estimates mixed logit demand models using the fast, "robust", and approximately correct (FRAC) approach developed by Salanie and Wolak (2019). The current version of the code assumes that random coefficients on product characteristics are independent of each other and normally distributed. Each of these can be relaxed in the future. 
 
+See [here](https://jamesbrandecon.github.io/FRAC.jl/FRAC.html) for a static Pluto notebook example similar to `example1.jl` 
+
 ## Installation
 I may continue to add things to the package and there may be some bugs remaining, so for now install directly from Github: 
 ```jl
