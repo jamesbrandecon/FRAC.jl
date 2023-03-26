@@ -10,45 +10,35 @@ Plots.theme(:ggplot2) # Change Plots.jl theme
 # wants to allow for preferences to differ in `B` separate time periods/geographic
 # regions.
 
-# This file performs the following:
-# -- Simulate demand data for many markets with varying numbers of products
-# -- Calculate IVs
-# -- Estimate FRAC models and calculate various price elasticities
-# -- Extract and plot results of all models
-
 B = 100; # number of separate models to estimate
 T = 20000; # number of markets/2
 
 J1 = 2; # number of products in half of markets
-J2 = 4;
+J2 = 4; # number of products in the other half of markets
 
-# Simulate demand with two characteristics, both with random coefficients
-# Run benchmarks for multiple FRAC models
-s,p,z,x = simulate_logit(J1,T,[-0.4 0.1], [0.5 0.5], 0.3);
-s2,p2,z2,x2 = simulate_logit(J2,T,[-0.4 0.1], [0.5 0.5], 0.3);
+df = FRAC.sim_logit_vary_J(J1, J2, T, B, [-0.4 1], [0.5 0.5], 0.3)
 
-# Reshape data into desired DataFrame, add necessary IVs
-df = toDataFrame(s,p,z,x);
-df = reshape_pyblp(df);
-df2 = reshape_pyblp(toDataFrame(s2,p2,z2,x2));
-df2[!,"product_ids"] = df2.product_ids .+ 2;
-df2[!,"market_ids"] = df2.market_ids .+ T .+1;
-df = [df;df2]
-df[!,"by_example"] = mod.(1:size(df,1),B); # Generate variable indicating separate geographies
-df[!,"demand_instruments1"] = df.demand_instruments0.^2;
-df[!,"demand_instruments2"] = df.x .^2;
+problem = define_problem(data = df, 
+            linear = ["prices", "x"], 
+            nonlinear = ["prices", "x"],
+            by_var = "by_example", 
+            fixed_effects = ["product_ids"],
+            se_type = "robust", 
+            constrained = true);
 
-# Add simple differentiation-style IVs: difference from market-level sum
-gdf = groupby(df, :market_ids);
-cdf = combine(gdf, names(df) .=> sum);
-cdf = select(cdf, Not(:market_ids_sum));
-sums = innerjoin(select(df, :market_ids), cdf, on = :market_ids);
-df[!,"demand_instruments3"] = (df.demand_instruments0 - sums.demand_instruments0_sum).^2;
-df[!,"demand_instruments4"] = (df.x - sums.x_sum).^2;
+estimate!(problem)
 
-df[!,"dummy_FE"] .= rand();
-df[!,"dummy_FE"] = (df.dummy_FE .> 0.5);
+price_elasticities!(problem)
 
+
+
+
+
+
+
+price_elasticities(frac_results = problem.results, data = df,
+    linear = "prices + x", nonlinear = "prices + x", which = "own",
+    by_var="by_example", product=2)
 # Estimate FRAC and calculate
 #   (1) all own-price elasticities and
 #   (2) all elasticities w.r.t. the good with product_ids == 1
