@@ -2,7 +2,7 @@ module FRAC
 
 using DataFrames, FixedEffectModels, LinearAlgebra
 using Statistics, Plots, Optim, Missings
-using ProgressMeter, Suppressor
+using ProgressMeter, Suppressor, Random, Distributions, Primes
 
 # Add helpful extension of addition function
     # This allows us to drop groups of terms from regression when irrelevant
@@ -47,6 +47,6 @@ include("elasticities.jl")
 # estimate!
 # plot
 
-export estimateFRAC, plotFRACResults, extractEstimates, price_elasticities, simulate_logit, toDataFrame, reshape_pyblp,
-    define_problem, estimate!
+export estimateFRAC, plotFRACResults, extractEstimates, simulate_logit, toDataFrame, reshape_pyblp,
+    define_problem, estimate!, price_elasticities!, own_elasticities, bootstrap!, get_elasticities
 end

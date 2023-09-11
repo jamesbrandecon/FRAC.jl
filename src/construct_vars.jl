@@ -30,19 +30,10 @@ function make_vars(problem, linear::Vector{String}, nonlinear::Vector{String}, s
     # Assuming one or two dimensions of FEs
     fe_terms = nothing;
     if fe_names!=[""]
-        @show fe_names
         num_fes = maximum(size(fe_names));
         for i=1:num_fes
             fe_terms += fe(Symbol(fe_names[i]));
         end
-        # if num_fes == 2
-        #     fe_1 = fe_names[1];
-        #     fe_2 = fe_names[2];
-        #     fe_terms = fe(Symbol(fe_1)) + fe(Symbol(fe_2));
-        # else
-        #     fe_1 = fe_names[1];
-        #     fe_terms = fe(Symbol(fe_1));
-        # end
     end
 
     # Construct LHS variable
@@ -65,7 +56,7 @@ function make_vars(problem, linear::Vector{String}, nonlinear::Vector{String}, s
         data = select!(data, Not(:e_sum))
     end
 
-    # Parameters for covariance parameters 
+    # Parameters for covariance parameters: NOT YET IMPLEMENTED
     if sigma_cov !=[]
         for i=1:size(nonlinear_vars,1)
             for j=1:size(nonlinear_vars,1)

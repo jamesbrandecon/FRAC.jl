@@ -1,12 +1,19 @@
 function FRAC_gmm(;data::DataFrame, linear_vars::Vector{String} = [""], 
     nonlinear_vars::Vector{String} = [""], fe_names::Vector{String} = [""], 
     iv_names::Vector{String} = [""], by_var = "", num_fes = 0, drop_singletons = true,
-    gmm_steps = 1)
+    gmm_steps = 1, RETURN_XI = true)
 
     num_linear = maximum(size(linear_vars));
     num_nonlinear = maximum(size(nonlinear_vars));
     price_ind = 0;
     results = [];
+
+    if RETURN_XI 
+        # Initialize dataframe with market_ids, to store xi
+        xi_storage = DataFrame(xi = zeros(size(data,1)), 
+            product_ids = data.product_ids, 
+            market_ids = data.market_ids);
+    end
 
     if by_var == ""
         global price_ind, results
@@ -63,6 +70,13 @@ function FRAC_gmm(;data::DataFrame, linear_vars::Vector{String} = [""],
             results = Optim.minimizer(results);
         end
 
+        # Evaluate gmm_obj at final results, to get xi
+        if RETURN_XI
+            xi = gmm_obj(results; data = data, linear_vars = linear_vars,
+                nonlinear_vars = nonlinear_vars, iv_names = iv_names, RETURN_XI = RETURN_XI);
+            xi_storage[!,"xi"] = xi;
+        end
+
         varnames = linear_vars,nonlinear_vars
         results = [results, varnames]
     else
@@ -112,38 +126,52 @@ function FRAC_gmm(;data::DataFrame, linear_vars::Vector{String} = [""],
                 lower, upper, initial_param, Fminbox(), autodiff = :forward);
             results_b = Optim.minimizer(results_b);
 
+              # Evaluate gmm_obj at final results, to get xi
+            if RETURN_XI
+                xi = gmm_obj(results; data = data_b, linear_vars = linear_vars,
+                    nonlinear_vars = nonlinear_vars, iv_names = iv_names, RETURN_XI = RETURN_XI);
+                xi_storage[data[!,by_var] .== b,"xi"] = xi;
+            end
+
             push!(results,results_b)
             next!(p) # update progress meter
         end
         varnames = linear_vars,nonlinear_vars
         push!(results, varnames)
     end
-    return results
+    return results, xi_storage
 end
 
 function gmm_obj(params; data::DataFrame, linear_vars = "", nonlinear_vars = "",
-    iv_names = "", W = inv(Array(data[!,iv_names])'Array(data[!,iv_names])), step = 1)
+    iv_names = "", W = inv(Array(data[!,iv_names])'Array(data[!,iv_names])), step = 1,
+    RETURN_XI = false)
     # xi =  y - beta * linear_vars - Sigma * K
     # moments = xi * iv_names; (n * k)
     # gmm_obj = moments' * moments;
 
     xi = data[!,"y"]; # initialize xi
-    Z = Array(data[!,iv_names]);
+    # Z = Array(data[!,iv_names]);
     num_linear = maximum(size(linear_vars));
-    for i = 1:length(linear_vars)
-        xi = xi - params[i] .* data[!,linear_vars[i]];
+    for lin ∈ linear_vars
+        i = findall(linear_vars .== lin)[1];
+        xi = xi - params[i] .* data[!,lin];
     end
 
-    for i = 1:length(nonlinear_vars)
-        xi = xi - params[i+num_linear] .* data[!,string("K_",nonlinear_vars[i])];
+    for nonlin ∈ nonlinear_vars
+        i = findall(nonlinear_vars .== nonlin)[1];
+        xi = xi - params[i+num_linear] .* data[!,string("K_",nonlin)];
     end
+
     moments = mean(xi .* Array(data[!,iv_names]), dims=1);
-    #W = inv(Z'Z); # will add second step weight matrix at some point
 
     if (step in [1,2])
         obj = moments * W * moments';
     else
         obj = xi .* Array(data[!,iv_names]);
     end
-    return obj[1];
+    if RETURN_XI
+        return xi;
+    else
+        return obj[1];
+    end
 end

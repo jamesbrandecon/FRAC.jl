@@ -1,295 +1,221 @@
-function own_price_elasticities(data::DataFrame, linear_vars,
-    nonlinear_vars, results::FixedEffectModel; I =50, save_mem = true)
-    # Find linear variables and parameters
-    linear_mean = zeros(size(data,1),1);
-    for l = 1:maximum(size(linear_vars))
-        l_index = findall(x-> x==linear_vars[l], coefnames(results));
-        linear_mean = linear_mean + data[!,linear_vars[l]] .* coef(results)[l_index];
+function own_elasticities(problem::FRACProblem)
+    if problem.all_elasticities == []
+        error("Must estimate model before calculating elasticities")
     end
-    # Use results to calculate residuals. Estimate of delta = linear_mean + xi
-    data[!,"xi"] = data[:,"y"] .- dropdims(linear_mean, dims=2);
-    u_i = zeros(size(data,1),I);
-
-    # u_i = data[!, linear_vars] * beta_i + eta_i
-    eta_i = zeros(size(data,1),1);
-    if save_mem == true
-        for i = 1:I
-            for nl = 1:maximum(size(nonlinear_vars))
-                nl_index = findall(x-> x== string("K_",nonlinear_vars[nl]), coefnames(results));
-                sigma = max(coef(results)[nl_index][1], 0); # Drop heterogeneity if estimates are negative
-                eta_i = eta_i .+ data[!,nonlinear_vars[nl]] .* sigma .* randn(size(data,1),1);
-            end
-            u_i = dropdims(linear_mean,dims=2) + eta_i;
+    df_out = DataFrame();
+    df_out[!,"market_ids"] = problem.data.market_ids;
+    df_out[!,"product_ids"] = problem.data.product_ids;
+    df_out[!,"own_elasticities"] .= 0.0;
+    elasts_no_index = getindex.(problem.all_elasticities,2);
+    # For each market_id, for each product in that market
+    for m ∈ unique(problem.data.market_ids)
+        market_index = problem.data.market_ids .==m;
+        for j ∈ unique(problem.data.product_ids)
+            df_out[(market_index) .& (df_out.product_ids .==j), "own_elasticities"] .= diag(elasts_no_index[getindex.(problem.all_elasticities,1) .== m][1])[j]
         end
     end
-    u_i = exp.(u_i);
-    u_i = DataFrame(u_i, :auto);
-    u_i[!,"market_ids"] = data.market_ids;
+    return df_out
+end
+"""
+    get_elasticities(problem::FRACProblem, products)
 
-    # Calculate market-level sums of exp(u)
-    gdf = groupby(u_i, :market_ids);
-    cdf = combine(gdf, names(u_i) .=> sum);
-    cdf = select(cdf, Not(:market_ids_sum));
+Helper function to calculate specific pairs of price elasticities. `products` is either a Tuple or Vector of length 2, where the first element is the product for which the elasticity is calculated and the second element is the product with respect to which the elasticity is calculated.
+"""
+function get_elasticities(problem::FRACProblem, products)
+    try 
+        @assert ((typeof(products)<:Tuple) | (typeof(products)<:Vector)) & (length(products) ===2)
+    catch 
+        error("Argument `products` must be either a Tuple or Vector of length 2")
+    end    
+    prod1 = products[1];
+    prod2 = products[2];
 
-    # Make a DataFrame with only market-level sums
-    u_sums = innerjoin(select(u_i, :market_ids), cdf, on = :market_ids);
-    shares_i = Matrix(u_i[!,r"x"])./ Matrix(1 .+ u_sums[!,r"x"]);
-
-    price_index = findall(x-> x=="prices", coefnames(results));
-    price_var_index = findall(x-> x=="K_prices", coefnames(results));
-    alpha = coef(results)[price_index];
-    sigma = max(coef(results)[price_var_index][1],0); # Don't use negative values for sigma
-    alpha_i = randn(1,I).*sigma .+ alpha;
-
-    # Closely matches estimates from NPDemand, March 3, 2021
-    own = data.prices ./ data.shares .* mean(repeat(alpha_i,size(data,1),1) .* shares_i .* (1 .- shares_i), dims = 2);
-    return own;
+    df_out = DataFrame(market_ids = unique(problem.data.market_ids));
+    df_out[!, "elast$(prod1)_$(prod2)"] .=0.0
+    elasts = getindex.(getindex.(problem.all_elasticities,2), prod1,prod2);
+    for m ∈ unique(problem.data.market_ids)
+        market_index = (df_out.market_ids .==m);
+        df_out[market_index, "elast$(prod1)_$(prod2)"] .= elasts[getindex.(problem.all_elasticities,1) .== m][1]
+    end
+    return df_out
 end
 
-function own_price_elasticities(data::DataFrame, linear_vars,
-    nonlinear_vars, results::Array{Float64,1}; I =50, save_mem = true)
+""" 
+    all_elasticities(problem::FRACProblem, 
+        results::Dict{Any,Any}; 
+        I = 50, 
+        product = 1, 
+        by_value = nothing)
 
-    # Find linear variables and parameters
-    num_lin = length(linear_vars);
-    linear_mean = zeros(size(data,1),1);
-    for l = 1:maximum(size(linear_vars))
-        linear_mean = linear_mean + data[!,linear_vars[l]] .* results[l];
+This function takes a `FRACProblem` and a dictionary of results as arguments. The dictionary of results should be the output of the `estimate!` function. It is an internal function that is not intended to be called by the user directly.
+"""
+function all_elasticities(problem::FRACProblem, 
+    results::Dict{Any,Any}; 
+    I = 50, 
+    product = 1, 
+    save_mem = true, 
+    by_value = nothing, 
+    raw_draws = [])
+
+    linear_vars = problem.linear;
+    nonlinear_vars = problem.nonlinear;
+
+    if raw_draws == []
+        error("Must provide monte carlo draws")
     end
-    # Use results to calculate residuals. Estimate of delta = linear_mean + xi
-    data[!,"xi"] = data[:,"y"] .- dropdims(linear_mean, dims=2);
 
-    u_i = zeros(size(data,1),I);
-    eta_i = zeros(size(data,1),1);
-    if save_mem == true
-        for i = 1:I
-            for nl = 1:maximum(size(nonlinear_vars))
-                #nl_index = findall(x-> x== string("K_",nonlinear_vars[nl]), coefnames(results));
-                sigma = results[nl + num_lin] # Drop heterogeneity if estimates are negative
-                eta_i = eta_i .+ data[!,nonlinear_vars[nl]] .* sigma .* randn(size(data,1),1);
-            end
-            u_i = dropdims(linear_mean,dims=2) + eta_i;
-        end
+    # Check whether problem.data should be subsetted -- if so, define data appropriately
+    if problem.by_var != ""
+        data = problem.data[problem.data[!,problem.by_var] .== by_value,:];
+    else
+        data = problem.data;
     end
-    u_i = exp.(u_i);
-    u_i = DataFrame(u_i, :auto);
-    u_i[!,"market_ids"] = data.market_ids;
 
-    # Calculate market-level sums of exp(u)
-    gdf = groupby(u_i, :market_ids);
-    cdf = combine(gdf, names(u_i) .=> sum);
-    cdf = select(cdf, Not(:market_ids_sum));
-
-    # Make a DataFrame with only market-level sums
-    u_sums = innerjoin(select(u_i, :market_ids), cdf, on = :market_ids);
-    shares_i = Matrix(u_i[!,r"x"])./ Matrix(1 .+ u_sums[!,r"x"]);
-
-    price_index = findall(x-> x=="prices", linear_vars);
-    price_var_index = findall(x-> x=="prices", nonlinear_vars)[1] + num_lin;
-    alpha = results[price_index];
-    sigma = results[price_var_index]
-    alpha_i = randn(1,I).*sigma .+ alpha;
-
-    own = data.prices ./ data.shares .* mean(repeat(alpha_i,size(data,1),1) .* shares_i .* (1 .- shares_i), dims = 2);
-    #(JMB)-- matches unconstrained estimates almost exactly
-    return own;
-end
-
-function cross_elasticities(data::DataFrame, linear_vars,
-    nonlinear_vars, results::FixedEffectModel; I =50, product = 1, save_mem = true)
-    # using HaltonSequences
-    # Halton(2, length = I) or haltonvalue(1,2) (first draw from halton w/ base 2)
-
-    linear_mean = zeros(size(data,1),1);
-    for l = 1:maximum(size(linear_vars))
-        l_index = findall(x-> x==linear_vars[l], coefnames(results));
-        linear_mean = linear_mean + data[!,linear_vars[l]] .* coef(results)[l_index];
+    # Generate mean utilities for each product, market pair 
+        # Begins with Δξ, adds in linear terms due to product characteristics, and then adds effects
+    data[!,"delta"] .= data.xi; # Note: xi is a misnomer, these are residuals after absorbing fixed effects 
+    # Add contribution from product characteristics 
+    for l ∈ linear_vars
+        data.delta = data.delta + data[!,l] .* results[Symbol("β_$(l)")];
     end
-    # Use calculate residuals. Estimate of delta = linear_mean + xi
-    data[!,"xi"] = data[:,"y"] .- dropdims(linear_mean, dims=2);
-
-    eta_i = zeros(size(data,1),1);
-    if save_mem == true
-        for i = 1:I
-            for nl = 1:maximum(size(nonlinear_vars))
-                nl_index = findall(x-> x== string("K_",nonlinear_vars[nl]), coefnames(results));
-                sigma = max(coef(results)[nl_index][1], 0); # Drop heterogeneity if estimates are negative
-                eta_i = eta_i .+ data[!,nonlinear_vars[nl]] .* sigma .* randn(size(data,1),1);
-            end
-            u_i = dropdims(linear_mean,dims=2) + eta_i;
-        end
+    # Add fixed effects
+    for f ∈ problem.fe_names
+        data.delta = data.delta .+ data[!,"estimatedFE_$(f)"];
     end
-    u_i = exp.(u_i);
-    u_i = DataFrame(u_i, :auto);
-    u_i[!,"market_ids"] = data.market_ids;
 
-    # Calculate market-level sums of exp(u)
-    gdf = groupby(u_i, :market_ids);
-    cdf = combine(gdf, names(u_i) .=> sum);
-    cdf = select(cdf, Not(:market_ids_sum));
-
-    # Make a DataFrame with only market-level sums
-    u_sums = innerjoin(select(u_i, :market_ids), cdf, on = :market_ids);
-    #shares_i = convert(Array{Float64,2},u_i[!,r"x"])./ convert(Array{Float64,2},(1 .+ u_sums[!,r"x"]));
-
-    price_index = findall(x-> x=="prices", coefnames(results));
-    price_var_index = findall(x-> x=="K_prices", coefnames(results));
-    alpha = coef(results)[price_index];
-    sigma = max(coef(results)[price_var_index][1],0); # Don't use negative values for sigma
-    alpha_i = randn(1,I).*sigma .+ alpha;
+    shares_i = shares_from_deltas(data.delta, problem, monte_carlo_draws = I, raw_draws = raw_draws, return_individual_shares = true);
+    alpha_i = results[Symbol("β_prices")] .+ raw_draws[findfirst(problem.nonlinear .== "prices")] .* sqrt(max(results[Symbol("σ2_prices")], 0)) 
 
     # own-derivatives are : alpha_i s_i (1-s_i)
     # cross-derivatives are: alpha_i s_i s_j
-    # Want matrices such that J(i,j) = \partial s_i / \partial p_j
-    #cross_elast = zeros(size(data,1));
-    cross_elast = zeros(size(data,1));
+    # Want matrices such that J(k,j) = ∂s_k / ∂p_j
+    # cross_elast = zeros(size(data,1));
+    elast_vec = zeros(size(data,1));
     for m = unique(data.market_ids) # loop over markets
         df_m = data[data.market_ids .==m,:];
-        prod_ind = findall(x-> x== product, df_m[!,"product_ids"]);
-        # find index of product of interest
+        prod_ind = findall(df_m[!,"product_ids"] .== product);
+
+        # Find index of product of interest
         if prod_ind != []
-            u_i_m = u_i[u_i.market_ids .==m,:]; # restrict data to market m
-            u_sums_m = u_sums[u_sums.market_ids .==m,:];
+            # Individual-level utilities and sums of exp(u) for market m
+            # u_i_m = u_i[u_i.market_ids .==m,:]; 
+            # u_sums_m = u_sums[u_sums.market_ids .==m,:];
 
-            # Getting market-specific shares
-            shares_i = Matrix(u_i_m[!,r"x"])./ Matrix(1 .+ u_sums_m[!,r"x"]);
+            # Market-specific individual-level shares
+            # shares_i = Matrix(u_i_m[!,r"x"])./ Matrix(1 .+ u_sums_m[!,r"x"]);
+            shares_i_m = shares_i[data.market_ids .==m,:];
+            alpha_i_m = Matrix(alpha_i[data.market_ids .==m, :])[1,:];
+            alpha_i_m = reshape(alpha_i_m, (1, length(alpha_i_m)))
 
-            elast_m = df_m.prices ./ df_m[prod_ind,"shares"] .* mean(-1 .* alpha_i .* shares_i .* shares_i[prod_ind,:],dims=2);
-            elast_m[prod_ind] = df_m[prod_ind,"prices"] ./ df_m[prod_ind,"shares"] .* mean(alpha_i .* shares_i[prod_ind,:] .* (1 .- shares_i[prod_ind,:]),dims=2);
-            global cross_elast[data[!,"market_ids"].==m,:] = elast_m;
+            # Now construct elasticities for market m
+                # ∂s_k / ∂p_j, k==`product` (function input), j==all other products
+                # @show size(alpha_i_m .* shares_i[prod_ind,:] .* (1 .- shares_i[prod_ind,:]));
+            elast_m = df_m.prices ./ df_m[prod_ind,"shares"] .* mean(-1 .* alpha_i_m .* shares_i_m .* shares_i[prod_ind,:],dims=2);
+            # @show df_m[prod_ind,"prices"] ./ df_m[prod_ind,"shares"] .* mean(alpha_i_m .* shares_i_m[prod_ind,:] .* (1 .- shares_i_m[prod_ind,:]),dims=2)
+            elast_m[prod_ind] = df_m[prod_ind,"prices"] ./ df_m[prod_ind,"shares"] .* mean(alpha_i_m .* shares_i_m[prod_ind,:] .* (1 .- shares_i_m[prod_ind,:]),dims=2);
+            elast_vec[data[!,"market_ids"].==m,:] = elast_m;
         end
     end
-    return cross_elast;
+    return elast_vec;
 end
 
-function cross_elasticities(data::DataFrame, linear_vars,
-    nonlinear_vars, results::Array{Float64,1}; I =50, product = 1, save_mem = true)
+"""
+    price_elasticities!(problem::FRACProblem)
 
-    num_lin = length(linear_vars);
-    linear_mean = zeros(size(data,1),1);
-    for l = 1:maximum(size(linear_vars))
-        linear_mean = linear_mean + data[!,linear_vars[l]] .* results[l];
+This function takes a `FRACProblem` as the sole required argument and modifies the `FRACProblem.all_elasticities` property inplace,
+replacing the (usually empty) array there with a Vector. Each element of the Vector is a Tuple of two values. 
+The first value of the Tuple is a `market_id`. The second is a matrix of price elasticities, where the (i,j)
+element of each matrix represents the elasticity of demand for product i with respect to the price of product j 
+where `market_ids`==m.
+"""
+function price_elasticities!(problem::FRACProblem; monte_carlo_draws = 50)
+    J = length(unique(problem.data.product_ids));
+    M = length(unique(problem.data.market_ids));
+
+    # Initialize Array which will hold all elasticities
+    elast_mat = [];
+    for m ∈ unique(problem.data.market_ids)
+        push!(elast_mat, [zeros(J,J), m])
     end
-    # Use calculate residuals. Estimate of delta = linear_mean + xi
-    data[!,"xi"] = data[:,"y"] .- dropdims(linear_mean, dims=2);
-    eta_i = zeros(size(data,1),1);
-    if save_mem == true
-        for i = 1:I
-            for nl = 1:maximum(size(nonlinear_vars))
-                sigma = results[nl+num_lin]; # Drop heterogeneity if estimates are negative
-                eta_i = eta_i .+ data[!,nonlinear_vars[nl]] .* sigma .* randn(size(data,1),1);
-            end
-            u_i = dropdims(linear_mean,dims=2) + eta_i;
+
+    # Make draws for random coefficients
+    raw_draws = make_draws(problem.data, monte_carlo_draws, length(problem.nonlinear))
+
+    elast_size_J = []
+    # Loop over j=1:J to get all elasticities with respect to each good.  
+    # Each j here corresponds to a row of the elasticity matrix
+    for j = 1:J
+        elast = inner_price_elasticities(;problem, 
+            frac_results = problem.estimated_parameters, 
+            linear = problem.linear, 
+            nonlinear = problem.nonlinear, 
+            by_var = problem.by_var, 
+            monte_carlo_draws = monte_carlo_draws, 
+            product = j,
+            raw_draws = raw_draws)
+        push!(elast_size_J, elast)
+    end
+    # # Loop over markets, stacking elasticities into one JxJ matrix per market
+    all_elasticity_matrices = [];
+    all_product_ids = unique(problem.data[!, :product_ids]);
+    for m ∈ unique(problem.data.market_ids)
+        # Get product_ids in this market 
+        product_ids_m = unique(problem.data[problem.data.market_ids .== m, :product_ids]);
+        J_m = length(product_ids_m);
+
+        # Reshape elasticities from this market into a single jacobian matrix 
+        elasticity_mat_m = zeros(J, J);
+        for j ∈ product_ids_m
+            indexes_in_market = [j ∈ product_ids_m for j in all_product_ids];
+            elasticity_mat_m[j,indexes_in_market.==1] = elast_size_J[j][problem.data.market_ids .== m];
         end
+        push!(all_elasticity_matrices, (m,elasticity_mat_m));
     end
-    u_i = exp.(u_i);
-    u_i = DataFrame(u_i, :auto);
-    u_i[!,"market_ids"] = data.market_ids;
 
-    # Calculate market-level sums of exp(u)
-    gdf = groupby(u_i, :market_ids);
-    cdf = combine(gdf, names(u_i) .=> sum);
-    cdf = select(cdf, Not(:market_ids_sum));
-
-    # Make a DataFrame with only market-level sums
-    u_sums = innerjoin(select(u_i, :market_ids), cdf, on = :market_ids);
-    #shares_i = convert(Array{Float64,2},u_i[!,r"x"])./ convert(Array{Float64,2},(1 .+ u_sums[!,r"x"]));
-
-    price_index = findall(x-> x=="prices", linear_vars);
-    price_var_index = findall(x-> x=="prices", nonlinear_vars);
-    alpha = results[price_index];
-    sigma = results[price_var_index]; # Don't use negative values for sigma
-    alpha_i = randn(1,I).*sigma .+ alpha;
-    cross_elast = zeros(size(data,1));
-    for m = unique(data.market_ids) # loop over markets
-        df_m = data[data.market_ids .==m,:];
-        prod_ind = findall(x-> x== product, df_m[!,"product_ids"]);
-        # find index of product of interest
-        if prod_ind != []
-            u_i_m = u_i[u_i.market_ids .==m,:]; # restrict data to market m
-            u_sums_m = u_sums[u_sums.market_ids .==m,:];
-
-            # Getting market-specific shares
-            shares_i = Matrix(u_i_m[!,r"x"])./ Matrix(1 .+ u_sums_m[!,r"x"]);
-
-            elast_m = df_m.prices ./ df_m[prod_ind,"shares"] .* mean(-1 .* alpha_i .* shares_i .* shares_i[prod_ind,:],dims=2);
-            elast_m[prod_ind] = df_m[prod_ind,"prices"] ./ df_m[prod_ind,"shares"] .* mean(alpha_i .* shares_i[prod_ind,:] .* (1 .- shares_i[prod_ind,:]),dims=2);
-            global cross_elast[data[!,"market_ids"].==m,:] = elast_m;
-        end
-    end
-#(JMB)-- matches unconstrained estimates almost exactly
-return cross_elast
+    problem.all_elasticities = all_elasticity_matrices;
 end
 
-function price_elasticities(;frac_results = [], data::DataFrame,
-        linear::String, nonlinear::String, by_var::String = "", which = "own",
-        monte_carlo_draws = 50, product = 1)
-    # This function takes in results of FRAC estimation
-    # and produces estiamtes of price elasticities
-
-    # Construct LHS variable
-    gdf = groupby(data, :market_ids);
-    cdf = combine(gdf, :shares => sum);
-    data = innerjoin(data, cdf, on=:market_ids);
-    data[!, "y"] = log.(data[!,"shares"] ./ (1 .- data[!,"shares_sum"]));
-
-    # Extract variable names from strings
-    temp_lin = split(linear, "+");
-    linear_vars = replace.(temp_lin, " " => "");
-    L = maximum(size(linear_vars));
-
-    temp_nonlin = split(nonlinear, "+");
-    nonlinear_vars = replace.(temp_nonlin, " " => "");
-    NL = maximum(size(nonlinear_vars));
+"""
+    inner_price_elasticities(;problem, 
+        frac_results = [], 
+        linear::Vector{String}, 
+        nonlinear::Vector{String}, 
+        by_var::String = "", 
+        monte_carlo_draws = 50, 
+        product = 1)
+        
+This function is called by `price_elasticities!` and is not intended to be called directly by the user. It is an intermediate function that passes the relevant arguments into `all_elasticities` and returns the results to be processed and re-shaped.
+"""
+function inner_price_elasticities(;problem, 
+    frac_results = [], 
+    linear::Vector{String}, 
+    nonlinear::Vector{String}, 
+    by_var::String = "", 
+    monte_carlo_draws = 50, product = 1, raw_draws = [])
 
     if by_var ==""
-        result_for_type_check = frac_results;
-    else
-        result_for_type_check = frac_results[1];
-    end
-
-    # Find which covariate corresponds to price
-    if typeof(result_for_type_check) == FixedEffectModel
-        price_index = findall(x-> x=="prices", coefnames(result_for_type_check));
-        price_var_index = findall(x-> x=="K_prices", coefnames(result_for_type_check));
-    else
-        num_lin = length(linear_vars);
-        price_index = findall(x-> x=="prices", linear_vars);
-        price_var_index = findall(x-> x=="prices", nonlinear_vars)[1] + num_lin;
-    end
-    mixed_logit = price_var_index !=[];
-
-    if by_var ==""
-        if which == "own"
-            own = own_price_elasticities(data, linear_vars,
-                nonlinear_vars, frac_results, I = monte_carlo_draws)
-            output = own;
-        else
-            cross_elast = cross_elasticities(data, linear_vars,
-                nonlinear_vars, frac_results, I = monte_carlo_draws, product = product)
-            output = cross_elast;
+        elasts = all_elasticities(problem, 
+                frac_results, 
+                I = monte_carlo_draws, 
+                product = product,
+                raw_draws = raw_draws)
+        output = elasts;
+    else        
+        # Calculate all price elasticities for each value of by_var 
+        output = zeros(size(problem.data,1),1);
+        by_var_values = unique(problem.data[!,by_var]);
+        for b ∈ by_var_values
+            # i = findfirst(by_var_values .==b);
+            elasts = all_elasticities(problem, 
+                frac_results[b], 
+                I = monte_carlo_draws, 
+                product = product, 
+                by_value = b,
+                raw_draws = raw_draws)
+            output[problem.data[!,by_var].==b,:] = elasts;
         end
-    else
-        if which == "own"
-            output = zeros(size(data,1),1);
-            by_var_values = unique(data[!,by_var]);
-            for b = by_var_values
-                i = findfirst(x->x==b, by_var_values);
-                    own = own_price_elasticities(data[data[!,by_var].==b,:], linear_vars,
-                        nonlinear_vars, frac_results[i], I = monte_carlo_draws)
-                output[data[!,by_var].==b,:] = own;
-            end
-        else
-            # Calculate cross-price elasticities
-            # have to be very careful to call correct products
-            output = zeros(size(data,1),1);
-            by_var_values = unique(data[!,by_var]);
-            for b = by_var_values
-                i = findfirst(x->x==b, by_var_values);
-                cross_elast = cross_elasticities(data[data[!,by_var].==b,:], linear_vars,
-                    nonlinear_vars, frac_results[i], I = monte_carlo_draws, product = product)
-                output[data[!,by_var].==b,:] = cross_elast;
-            end
-        end
+        
+        # end
     end
 
     return output

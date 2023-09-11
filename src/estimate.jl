@@ -1,6 +1,6 @@
 function estimate!(problem::FRACProblem)
     constrained = problem.constrained;
-    data = problem.data;
+    data = deepcopy(problem.data);
     
     iv_names = problem.iv_names;
     fe_terms = problem.fe_terms;
@@ -11,38 +11,124 @@ function estimate!(problem::FRACProblem)
     method = problem.method;
     by_var = problem.by_var;
 
+    if "xi" ∉ names(data)
+        data[!,"xi"] = zeros(Float64, size(data,1));
+    end
 
     if constrained == false
         # Run IV regression(s)
         results = []
         if by_var ==""
-            results = reg(data, term(:y) ~ (sum(term.(Symbol.(endog_vars))) ~ sum(term.(Symbol.(iv_names)))) + linear_exog_terms + fe_terms, se, method=method);
+            results = reg(data, term(:y) ~ (sum(term.(Symbol.(endog_vars))) ~ sum(term.(Symbol.(iv_names)))) + linear_exog_terms + fe_terms, 
+                se, 
+                save = :all, 
+                method=method);
+            for f ∈ problem.fe_names
+                problem.data[!, "estimatedFE_$(f)"] .= 0.0;
+            end
+            # Save residuals
+            problem.data[!,"xi"] .= residuals(results);
+            
+            # Save estimated fixed effects in data 
+            estimated_FEs = fe(results);
+            for f ∈ problem.fe_names
+                problem.data[:,"estimatedFE_$(f)"] .= estimated_FEs[!,findfirst(problem.fe_names .== f)];
+            end
+
+            # Store estimated parameters in a dictionary
+            estimated_param_dict = Dict();
+            for i ∈ problem.linear
+                param_name = Symbol("β_$(i)");
+                index = findfirst(coefnames(results) .== i)
+                push!(estimated_param_dict, param_name => coef(results)[index])
+            end
+            for i ∈ problem.nonlinear
+                param_name = Symbol("σ2_$(i)");
+                index = findfirst(coefnames(results) .== "K_$(i)")
+                push!(estimated_param_dict, param_name => coef(results)[index])
+            end
+            problem.estimated_parameters = estimated_param_dict;
         else
             by_var_values = unique(data[!,by_var]);
             p = Progress(length(by_var_values), 1);
+            estimated_param_dict = Dict();
+            for f ∈ problem.fe_names
+                problem.data[!, "estimatedFE_$(f)"] .= 0.0;
+            end
             for b = by_var_values
-                # oldstd = stdout;
-                # redirect_stdout(open("/dev/null", "w"))
-                # @suppress begin
-                    results_b = reg(data[data[!,by_var] .== b,:], term(:y) ~ (sum(term.(Symbol.(endog_vars))) ~ sum(term.(Symbol.(iv_names)))) + linear_exog_terms + fe_terms, se, method=method);
-                # end
-                # redirect_stdout(oldstd) # recover origi
+                # Estimate FRAC regression for each by_var value
+                results_b = reg(data[data[!,by_var] .== b,:], 
+                    term(:y) ~ (sum(term.(Symbol.(endog_vars))) ~ sum(term.(Symbol.(iv_names)))) + linear_exog_terms + fe_terms, 
+                    se, save = :all,
+                    method = method);
+                # Save residuals in data
+                problem.data[problem.data[!,by_var] .== b,"xi"] .= residuals(results_b);
+                # Save estimated fixed effects in data 
+                estimated_FEs = fe(results_b);
+                for f ∈ problem.fe_names
+                    problem.data[problem.data[!,by_var] .== b,"estimatedFE_$(f)"] .= estimated_FEs[!,findfirst(problem.fe_names .== f)];
+                end
+                
                 next!(p)
                 push!(results, results_b)
+                # Store estimated parameters in a nested dictionary: each dictionary entry is a by_var value, and each value is a dictionary of estimated parameters
+                by_val_dict = Dict();
+                for i ∈ problem.linear
+                    param_name = Symbol("β_$(i)");
+                    index = findfirst(coefnames(results_b) .== i)
+                    push!(by_val_dict, param_name => coef(results_b)[index])
+                end
+                for i∈ problem.nonlinear 
+                    param_name = Symbol("σ2_$(i)");
+                    index = findfirst(coefnames(results_b) .== "K_$(i)")
+                    push!(by_val_dict, param_name => coef(results_b)[index])
+                end
+                push!(estimated_param_dict, b => by_val_dict)
             end
+            problem.estimated_parameters = estimated_param_dict;
         end
     else
         # Estimate via constrained GMM
-        results = FRAC_gmm(data = data, 
+        results, xi_hat = FRAC_gmm(data = data, 
             linear_vars = problem.linear,
             nonlinear_vars = problem.nonlinear, 
             fe_names = problem.fe_names,
-            iv_names = iv_names, 
+            iv_names = union(iv_names, setdiff(problem.linear,["prices"])), 
             by_var = by_var, 
             num_fes = length(problem.fe_names), 
             drop_singletons = true,
             gmm_steps = 2);
+        
+        # problem.data[!,"xi"] .= xi_hat;
+        if "xi" ∈ names(problem.data)
+            @warn "Overwriting existing xi column in data"
+            select!(problem.data, Not(:xi))
+        end
+        leftjoin!(problem.data, xi_hat, on = [:market_ids, :product_ids])
+
+        estimated_param_dict = Dict();
+        for i ∈ eachindex(results[2])
+            for j ∈ eachindex(results[2][i])
+                index = (i-1)*length(results[2][i]) + j;
+                var_name = results[2][i][j];
+                if i==1
+                    param_name = Symbol("β_$(var_name)");
+                    push!(estimated_param_dict, param_name => results[1][index])
+                else
+                    param_name = Symbol("σ2_$(var_name)");
+                    push!(estimated_param_dict, param_name => results[1][index])
+                end 
+            end
+        end
+        problem.estimated_parameters = estimated_param_dict;
+
+        # Get estimated fixed effects 
+        get_FEs!(problem);
+        # for f ∈ problem.fe_names
+        #     problem.data[!,"estimatedFE_$(f)"] .= estimatedFEs[!,findfirst(problem.fe_names .== f)];
+        # end
     end
 
-    problem.results = results;
+    problem.raw_results_internal = results;
+    
 end

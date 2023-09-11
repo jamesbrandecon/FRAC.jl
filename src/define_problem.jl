@@ -1,3 +1,14 @@
+"""
+    define_problem(; linear =["prices"], nonlinear = [""], 
+        data, fixed_effects = [""],
+        by_var = "", se_type = "robust", 
+        cluster_var = "", constrained::Bool = false,
+        drop_singletons = true, gmm_steps = 2, method = :cpu)
+
+This function is used to construct a FRAC problem object. The key inputs are the data, the linear and nonlinear covariates, and the fixed effects, 
+all of which are specified as vectors of strings. The user can also specify the type of standard errors to be used, the cluster variable, 
+whether the model is constrained, and the number of GMM steps to be used. Presently, `method` is not used. 
+"""
 function define_problem(;linear::Vector{String}=["prices"], nonlinear::Vector{String} = [""], 
     data::DataFrame, fixed_effects::Vector{String} = [""],
     by_var::String="", se_type = "robust", 
@@ -46,6 +57,10 @@ function define_problem(;linear::Vector{String}=["prices"], nonlinear::Vector{St
             drop_singletons, 
             gmm_steps, 
             method, 
+            [],
+            [],
+            [],
+            [],
             []);
     
 
@@ -62,7 +77,7 @@ function define_problem(;linear::Vector{String}=["prices"], nonlinear::Vector{St
     cdf = combine(gdf, :shares => sum);
     data = innerjoin(data, cdf, on=:market_ids);
     problem.data[!, "y"] = log.(data[!,"shares"] ./ (1 .- data[!,"shares_sum"]));
-    
+
     return problem
 end
 
@@ -84,7 +99,11 @@ mutable struct FRACProblem
     drop_singletons 
     gmm_steps 
     method
-    results
+    raw_results_internal
+    estimated_parameters
+    all_elasticities 
+    bootstrapped_parameters_all
+    bootstrap_debiased_parameters
 end
 
 
@@ -94,7 +113,7 @@ function Base.show(io::IO, problem::FRACProblem)
 
     println(io, "FRAC Problem:")
     println(io, "- Number of total choices: $(J)")
-    println(io, "- Number of products: $(T)")
+    println(io, "- Number of markets: $(T)")
 
 end
 
