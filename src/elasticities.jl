@@ -59,6 +59,7 @@ function all_elasticities(problem::FRACProblem,
 
     linear_vars = problem.linear;
     nonlinear_vars = problem.nonlinear;
+    by_var = problem.by_var;
 
     if raw_draws == []
         error("Must provide monte carlo draws")
@@ -75,16 +76,34 @@ function all_elasticities(problem::FRACProblem,
         # Begins with Δξ, adds in linear terms due to product characteristics, and then adds effects
     data[!,"delta"] .= data.xi; # Note: xi is a misnomer, these are residuals after absorbing fixed effects 
     # Add contribution from product characteristics 
-    for l ∈ linear_vars
-        data.delta = data.delta + data[!,l] .* results[Symbol("β_$(l)")];
+    if by_var==""
+        for l ∈ linear_vars
+            data.delta = data.delta + data[!,l] .* results[Symbol("β_$(l)")];
+        end 
+    else
+        for l ∈ linear_vars, b ∈ unique(data[!,by_var])
+            data[data[!,by_var].==b,:delta] = data[data[!,by_var].==b, :delta] + data[data[!,by_var].==b,l] .* results[b][Symbol("β_$(l)")];
+        end 
     end
     # Add fixed effects
     for f ∈ problem.fe_names
         data.delta = data.delta .+ data[!,"estimatedFE_$(f)"];
     end
 
-    shares_i = shares_from_deltas(data.delta, problem, monte_carlo_draws = I, raw_draws = raw_draws, return_individual_shares = true);
-    alpha_i = results[Symbol("β_prices")] .+ raw_draws[findfirst(problem.nonlinear .== "prices")] .* sqrt(max(results[Symbol("σ2_prices")], 0)) 
+    shares_i = zeros(Float64, size(data,1), I);
+    alpha_i = zeros(Float64, size(raw_draws[1]));
+    if by_var == ""
+        shares_i = shares_from_deltas(data.delta, problem.data, monte_carlo_draws = I, raw_draws = 
+            raw_draws, return_individual_shares = true, linear_vars = linear_vars, nonlinear_vars = nonlinear_vars, results = results, by_var = problem.by_var);
+        alpha_i = results[Symbol("β_prices")] .+ raw_draws[findfirst(problem.nonlinear .== "prices")] .* sqrt(max(results[Symbol("σ2_prices")], 0))
+    else 
+        for b ∈ unique(data[!,by_var])
+            draw_index = findall(data[!,by_var].==b);
+            raw_draws_b = [raw_draws[i][draw_index,:] for i ∈ 1:length(raw_draws)];
+            shares_i[data[!,by_var].==b,:] = shares_from_deltas(data[data[!,by_var].==b,:delta], data[data[!,by_var].==b,:], monte_carlo_draws = I, raw_draws = raw_draws_b, return_individual_shares = true, linear_vars = linear_vars, nonlinear_vars = nonlinear_vars, results = results[b], by_var = problem.by_var);
+            alpha_i[data[!,by_var].==b,:] = results[b][Symbol("β_prices")] .+ raw_draws_b[findfirst(problem.nonlinear .== "prices")] .* sqrt(max(results[b][Symbol("σ2_prices")], 0))
+        end
+    end
 
     # own-derivatives are : alpha_i s_i (1-s_i)
     # cross-derivatives are: alpha_i s_i s_j
@@ -207,12 +226,13 @@ function inner_price_elasticities(;problem,
         for b ∈ by_var_values
             # i = findfirst(by_var_values .==b);
             elasts = all_elasticities(problem, 
-                frac_results[b], 
+                frac_results, 
                 I = monte_carlo_draws, 
                 product = product, 
                 by_value = b,
                 raw_draws = raw_draws)
-            output[problem.data[!,by_var].==b,:] = elasts;
+            # output[problem.data[!,by_var].==b,:] = elasts;
+            output = elasts;
         end
         
         # end

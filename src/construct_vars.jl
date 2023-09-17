@@ -19,7 +19,6 @@ function make_vars(problem, linear::Vector{String}, nonlinear::Vector{String}, s
 
     iv_names = names(data[!, r"demand_instruments"]);
 
-    # fe_names = "";
     num_fes = 0;
 
     # Raise error if model is clearly under-identified
@@ -35,12 +34,6 @@ function make_vars(problem, linear::Vector{String}, nonlinear::Vector{String}, s
             fe_terms += fe(Symbol(fe_names[i]));
         end
     end
-
-    # Construct LHS variable
-    # gdf = groupby(data, :market_ids);
-    # cdf = combine(gdf, :shares => sum);
-    # data = innerjoin(data, cdf, on=:market_ids);
-    # data[!, "y"] = log.(data[!,"shares"] ./ (1 .- data[!,"shares_sum"]));
 
     # Construct regressors for variance parameters
     endog_vars = [];

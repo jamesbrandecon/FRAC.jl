@@ -61,55 +61,52 @@ function replace_xi_contraction!(problem::FRACProblem)
     problem.data[!,"xi"] = problem.data[!,"xi_contraction"];
 end
 
-function shares_from_deltas(deltas, problem::FRACProblem; seed = 10293, monte_carlo_draws = 50, 
-    raw_draws = [], return_individual_shares = false)
-    
-    data = problem.data;
-    linear_vars = problem.linear;
-    nonlinear_vars = problem.nonlinear;
-    results = problem.estimated_parameters;
-    I = monte_carlo_draws;
-    
-    # Random.seed!(seed)
+function shares_from_deltas(deltas, data::DataFrame; 
+    seed = 10293, monte_carlo_draws = 50, 
+    raw_draws = [], return_individual_shares = false,
+    linear_vars = [], nonlinear_vars = [],
+    results = [], by_var = "")
 
-     # Simulate draws for random coefficients
-     eta_i = zeros(Float64, size(data,1),1);
-     u_i = zeros(Float64, size(data,1),1);
-     alpha_i = zeros(Float64, size(data,1),I);
- 
-     # Currently a loop over number of simulated customers for a reason I don't remember -- old code, should update to matrix 
-     for i = 1:I
-         eta_i = zeros(Float64, size(data,1),1);
-         for nl ∈ nonlinear_vars
+    I = monte_carlo_draws;
+
+    # Simulate draws for random coefficients
+    eta_i = zeros(Float64, size(data,1),1);
+    u_i = zeros(Float64, size(data,1),1);
+    alpha_i = zeros(Float64, size(data,1),I);
+
+    # Currently a loop over number of simulated customers for a reason I don't remember -- old code, should update to matrix 
+    for i = 1:I
+        eta_i = zeros(Float64, size(data,1),1);
+        for nl ∈ nonlinear_vars
             sigma = sqrt(max(results[Symbol("σ2_$(nl)")], 0)); # Drop heterogeneity if estimates are negative
             k = findfirst(nonlinear_vars .== nl)
             scaled_draws = sigma .* raw_draws[k][:,i];
             eta_i = eta_i .+ data[!,nl] .* scaled_draws;
-         end
-         u_i = hcat(u_i, deltas + eta_i);
-     end
- 
-     # Exponentiate individual utilities for market share calculation and add market_ids column
-     u_i = exp.(u_i[:,2:end]);
-     u_i = DataFrame(u_i, :auto);
-     u_i[!,"market_ids"] = data.market_ids;
- 
-     # Calculate market-level sums of exp(u)
-     gdf = groupby(u_i, :market_ids);
-     cdf = combine(gdf, names(u_i) .=> sum);
-     cdf = select(cdf, Not(:market_ids_sum));
- 
-     # Make a DataFrame with only market-level sums of exp(u)
-     u_sums = innerjoin(select(u_i, :market_ids), cdf, on = :market_ids);
- 
-     shares_i = Matrix(u_i[!,r"x"])./ Matrix(1 .+ u_sums[!,r"x"]);
-     if return_individual_shares
+        end
+        u_i = hcat(u_i, deltas + eta_i);
+    end
+
+    # Exponentiate individual utilities for market share calculation and add market_ids column
+    u_i = exp.(u_i[:,2:end]);
+    u_i = DataFrame(u_i, :auto);
+    u_i[!,"market_ids"] = data.market_ids;
+
+    # Calculate market-level sums of exp(u)
+    gdf = groupby(u_i, :market_ids);
+    cdf = combine(gdf, names(u_i) .=> sum);
+    cdf = select(cdf, Not(:market_ids_sum));
+
+    # Make a DataFrame with only market-level sums of exp(u)
+    u_sums = innerjoin(select(u_i, :market_ids), cdf, on = :market_ids);
+
+    shares_i = Matrix(u_i[!,r"x"])./ Matrix(1 .+ u_sums[!,r"x"]);
+    if return_individual_shares
         shares_i
         return shares_i
-     else
+    else
         shares = mean(shares_i, dims=2);
         return shares
-     end
+    end
 end
 
 function run_contraction_mapping(initial_deltas, problem::FRACProblem)
@@ -121,7 +118,8 @@ function run_contraction_mapping(initial_deltas, problem::FRACProblem)
     while maximum(abs.(delta_next .- delta_old)) > 1e-12
         delta_old .= delta_next;
         delta_next .= delta_old .+ log.(problem.data.shares) .- 
-                log.(shares_from_deltas(delta_old, copyproblem, monte_carlo_draws=I, raw_draws = raw_draws));
+                log.(shares_from_deltas(delta_old, copyproblem.data, monte_carlo_draws=I, 
+                raw_draws = raw_draws, linear_vars = problem.linear, nonlinear_vars = problem.nonlinear, results = problem.estimated_parameters, by_var = problem.by_var));
         # @show maximum(abs.(problem.data.shares .- shares_from_deltas(delta_old, copyproblem)))
     end
     return delta_next
@@ -139,9 +137,6 @@ function shares_for_bootstrap(problem, xi_boot; I=50, save_mem = true, raw_draws
     else
         data = problem.data;
     end
-    
-    # Assign bootstrapped ξ to column of data
-    # deltas = xi_boot;
 
     # Generate mean utilities for each product, market pair 
         # Begins with Δξ, adds in linear terms due to product characteristics, and then adds effects
@@ -155,10 +150,10 @@ function shares_for_bootstrap(problem, xi_boot; I=50, save_mem = true, raw_draws
     for f ∈ problem.fe_names
         deltas = deltas .+ data[!,"estimatedFE_$(f)"];
     end
-    # data[!,"delta"] = data.delta .- data.xi .+ data.xi_boot;
-    # @show mean(deltas)
-    shares = shares_from_deltas(deltas, problem, monte_carlo_draws = I, raw_draws = raw_draws);
-    # data[!, "shares"] .= shares;
+    
+    shares = shares_from_deltas(deltas, problem.data, monte_carlo_draws = I, raw_draws = raw_draws, 
+        linear_vars = linear_vars, nonlinear_vars = nonlinear_vars, results = results, by_var = problem.by_var);
+    
     return shares
 end
 
@@ -210,7 +205,7 @@ function bootstrap!(problem::FRACProblem; nboot = 100, ndraws = 100, approximate
             problem_boot = define_problem(data = select(copydata, Not(:xi)), 
                     linear = problem.linear, 
                     nonlinear = problem.nonlinear,
-                    by_var = problem.by_var, 
+                    # by_var = problem.by_var, 
                     fixed_effects = problem.fe_names,
                     se_type = problem.se_type, 
                     constrained = problem.constrained);
@@ -234,6 +229,14 @@ function bootstrap!(problem::FRACProblem; nboot = 100, ndraws = 100, approximate
     # return boot_results, adjusted_parameters
     problem.bootstrapped_parameters_all = boot_results;
     problem.bootstrap_debiased_parameters = adjusted_parameters;
+    
+    # Calculate standard deviation of each parameter in boot_results and assign to problem.se 
+    se_dict = Dict()
+    for i ∈ eachindex(problem.estimated_parameters)
+        push!(se_dict, i => std([boot_results[j][i] for j = 1:nboot]))
+    end
+    problem.se = se_dict;
+
 end
 
 function make_draws(data::DataFrame, I::Int, K::Int; seed = 10293)

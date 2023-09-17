@@ -1,7 +1,7 @@
 """
     define_problem(; linear =["prices"], nonlinear = [""], 
         data, fixed_effects = [""],
-        by_var = "", se_type = "robust", 
+        se_type = "robust", 
         cluster_var = "", constrained::Bool = false,
         drop_singletons = true, gmm_steps = 2, method = :cpu)
 
@@ -11,27 +11,25 @@ whether the model is constrained, and the number of GMM steps to be used. Presen
 """
 function define_problem(;linear::Vector{String}=["prices"], nonlinear::Vector{String} = [""], 
     data::DataFrame, fixed_effects::Vector{String} = [""],
-    by_var::String="", se_type = "robust", 
+    se_type = "bootstrap", 
     cluster_var = "", constrained::Bool = false,
     drop_singletons::Bool = true, gmm_steps = 2, method = :cpu)
+
+    by_var = "";
 
     sigma_cov = [];
     
     if linear== ""
         error("At least one covariate (price) must enter utility linearly")
     end
-    if !(se_type in ["simple", "robust", "cluster"])
-        error("se_type must be either simple, robust, or cluster")
+    if se_type!= "bootstrap"
+        @warn "While other standard errors are supported for unconstrained problems, I advise using bootstrapped standard errors. `robust` and `cluster` standard errors seem to be biased downward."
+    end
+    if !(se_type in ["simple", "robust", "cluster", "bootstrap"])
+        error("se_type must be either simple, robust, cluster, or bootstrap")
     end
     if se_type == "cluster" && cluster_var == ""
         error("cluster_var must be specified if se_type == 'cluster'")
-    end
-    if se_type == "simple"
-        se = Vcov.simple();
-    elseif se_type == "robust"
-        se = Vcov.robust();
-    elseif se_type == "cluster"
-        se = Vcov.cluster(Symbol(cluster_var));
     end
 
     linear_exog_vars = []; linear_exog_terms=[]; nonlinear_vars=[]; 
@@ -51,7 +49,7 @@ function define_problem(;linear::Vector{String}=["prices"], nonlinear::Vector{St
             linear_exog_terms,
             fe_terms,
             se_type, 
-            se,
+            [],
             cluster_var, 
             constrained,
             drop_singletons, 
