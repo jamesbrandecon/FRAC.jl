@@ -10,79 +10,63 @@ Plots.theme(:ggplot2) # Change Plots.jl theme
 # wants to allow for preferences to differ in `B` separate time periods/geographic
 # regions.
 
-# This file performs the following:
-# -- Simulate demand data for many markets with varying numbers of products
-# -- Calculate IVs
-# -- Estimate FRAC models and calculate various price elasticities
-# -- Extract and plot results of all models
-
 B = 100; # number of separate models to estimate
-T = 20000; # number of markets/2
+T = 2000; # number of markets/2
 
 J1 = 2; # number of products in half of markets
-J2 = 4;
+J2 = 4; # number of products in the other half of markets
 
-# Simulate demand with two characteristics, both with random coefficients
-# Run benchmarks for multiple FRAC models
-s,p,z,x = simulate_logit(J1,T,[-0.4 0.1], [0.5 0.5], 0.3);
-s2,p2,z2,x2 = simulate_logit(J2,T,[-0.4 0.1], [0.5 0.5], 0.3);
+df = FRAC.sim_logit_vary_J(J1, J2, T, B, [-1 1], [0.3 0.3], 0.3, with_market_FEs = true);
 
-# Reshape data into desired DataFrame, add necessary IVs
-df = toDataFrame(s,p,z,x);
-df = reshape_pyblp(df);
-df2 = reshape_pyblp(toDataFrame(s2,p2,z2,x2));
-df2[!,"product_ids"] = df2.product_ids .+ 2;
-df2[!,"market_ids"] = df2.market_ids .+ T .+1;
-df = [df;df2]
-df[!,"by_example"] = mod.(1:size(df,1),B); # Generate variable indicating separate geographies
-df[!,"demand_instruments1"] = df.demand_instruments0.^2;
-df[!,"demand_instruments2"] = df.x .^2;
+# Define and estimate two problems: one constrained, another unconstrained
+# NOTE: I recommend using se_type = "bootstrap" for all problems, as other standard errors seem to be biased downward
+    # see testing_debias.jl for usage of the boostrap function
+    # once estimated, standard errors are saved as a dictionary in problem.se
+problem = define_problem(data = df, 
+            linear = ["prices", "x"], 
+            nonlinear = ["prices", "x"],
+            # by_var = "by_example", 
+            fixed_effects = ["market_ids"],
+            se_type = "bootstrap", 
+            constrained = false);
 
-# Add simple differentiation-style IVs: difference from market-level sum
-gdf = groupby(df, :market_ids);
-cdf = combine(gdf, names(df) .=> sum);
-cdf = select(cdf, Not(:market_ids_sum));
-sums = innerjoin(select(df, :market_ids), cdf, on = :market_ids);
-df[!,"demand_instruments3"] = (df.demand_instruments0 - sums.demand_instruments0_sum).^2;
-df[!,"demand_instruments4"] = (df.x - sums.x_sum).^2;
+estimate!(problem);
 
-df[!,"dummy_FE"] .= rand();
-df[!,"dummy_FE"] = (df.dummy_FE .> 0.5);
+problemcon = define_problem(data = df, 
+            linear = ["prices", "x"], 
+            nonlinear = ["prices", "x"],
+            fixed_effects = ["market_ids"],
+            se_type = "bootstrap", 
+            constrained = true);
 
-# Estimate FRAC and calculate
-#   (1) all own-price elasticities and
-#   (2) all elasticities w.r.t. the good with product_ids == 1
+estimate!(problemcon)
 
-# All models include two dimensions of random coefficients and two fixed effects
-@time results = estimateFRAC(data = df, linear= "prices + x", nonlinear = "prices + x",
-    by_var = "by_example", fes = "product_ids + dummy_FE",
-    se_type = "robust", constrained = false)
-@time own_elast = price_elasticities(frac_results = results, data = df,
-    linear = "prices + x", nonlinear = "prices + x", which = "own",
-    by_var="by_example")
-@time cross_elast = price_elasticities(frac_results = results, data = df,
-    linear = "prices + x", nonlinear = "prices + x", which = "cross",
-    by_var="by_example", product=2)
+# Calculate all price elasticities 
+    # results stored in problem.all_elasticities
+price_elasticities!(problem; monte_carlo_draws = 100);
+price_elasticities!(problemcon; monte_carlo_draws = 100);
 
-# Extraneous helper functions can be used to plot FRAC results with standard
-# errors (when unconstrained). Here we show, for all estimated models,
-#   (1) Mean price coefficient
-#   (2) Variance of price coefficient
-#   (3) Variance of x coefficient
-# (Horizontal lines indicate true value)
+# Extract all own-price elasticities in a convenient DataFrame
+own_elasts = own_elasticities(problem) # implemented, returns dataframe of own-price elasticities paired with market_ids and product_ids
+own_elastscon = own_elasticities(problemcon)
 
-plot1 = plotFRACResults(df, frac_results = results, var = "prices", plot = "scatter", by_var = "by_example")
-plot!(plot1, ylims = (-1, 0), leg=false)
-plot!([-0.4], linetype = :hline, linewidth = 2)
+# Compare to logit own-price elasticities, which will be wrong when there are random coefficients but which in practice should 
+# be highly correlated with the true elasticities
+own_elasts[!,"logit_elasticity"] = -1 .* df.prices .* (1 .- df.shares)
 
-plot2 = plotFRACResults(df, frac_results = results, var = "prices", param = "sd", plot = "scatter", by_var = "by_example")
-plot!(plot2, ylims = (0, 0.5))
-plot!([0.25], linetype = :hline, linewidth = 2)
+scatter(own_elasts.logit_elasticity, own_elasts.own_elasticities, 
+    xlabel = "Logit", ylabel = "FRAC", label = false)
 
-plotFRACResults(df,frac_results = results, var = "x", param = "sd", plot = "scatter", by_var = "by_example")
-plot!([0.25], linetype = :hline, linewidth = 2)
+# Use helper function to get elasticity of share 1 with respect to price 2
+# Output is a dataframe with a market_ids field and a single column of elasticities
+# Elasticities will be zero if and only if the two specified products are not both in the corresponding market
+elast_1_2 = get_elasticities(problem, [1,2]); 
 
-# Can also extract estimates, SEs, and groups (values of by_var) in the same order
-alphas, alpha_se, byvals = extractEstimates(df, frac_results = results, param = "mean", by_var = "by_example")
-sigmas, sigma_se, byvals = extractEstimates(df, frac_results = results, param = "sigmas", by_var = "by_example")
-xsigmas, xsigma_se, byvals = extractEstimates(df, frac_results = results, var = "x", param = "sigmas", by_var = "by_example")
+# Compare estimated fixed effects to the truth 
+# NOTE: with only a few products (2-4 depending on the market) in this example, market fixed effects are not precisely estimated
+scatter(problem.data.market_FEs, problem.data.estimatedFE_market_ids, 
+    xlabel = "Truth", ylabel = "Estimate", label = "market_ids")
+
+# Compare estimated fixed effects between constrained and unconstrained problem
+scatter(problem.data.estimatedFE_market_ids, problemcon.data.estimatedFE_market_ids, 
+    xlabel = "Unconstrained", ylabel = "Constrained", label = "market_ids")

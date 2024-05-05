@@ -1,12 +1,14 @@
 # FRAC.jl
-The package is brand new! Consider it a beta version, and let me know if you encounter issues. 
 
-This package estimates mixed logit demand models using the fast, "robust", and approximately correct (FRAC) approach developed by Salanie and Wolak (2019). The current version of the code assumes that random coefficients on product characteristics are independent of each other and normally distributed. Each of these can be relaxed in the future. 
+[![](https://img.shields.io/badge/docs-stable-blue.svg)](https://jamesbrandecon.github.io/FRAC.jl)
+(Note: docs link not yet working)
 
-See [here](https://jamesbrandecon.github.io/FRAC.jl/FRAC.html) for a static Pluto notebook example similar to `example1.jl` 
+Consider this package a beta version, and let me know if you encounter issues. I have recently begun re-writing most of the package from scratch. The link above will send you to a short docs website to explain the usage of the package. 
+
+This package estimates mixed logit demand models using the fast, "robust", and approximately correct (FRAC) approach developed by [Salanie and Wolak (2022)](https://economics.sas.upenn.edu/system/files/2022-04/Econometrics%2004112022.pdf). The current version of the code assumes that random coefficients on product characteristics are independent of each other and normally distributed. Each of these can be relaxed in the future, the former very easily.
 
 ## Installation
-I may continue to add things to the package and there may be some bugs remaining, so for now install directly from Github: 
+I hope to add things to the package and debug as needed, so install directly from Github: 
 ```jl
 using Pkg
 Pkg.add(url = "https://github.com/jamesbrandecon/FRAC.jl")
@@ -23,81 +25,48 @@ DataFrameRow
    1 │ 2.83905  0.426725            1           1             0.866898             0.751512
 ```
 
-With this data, one can estimate FRAC and calculate own-price elasticities using 
+With this data, one can estimate FRAC and calculate all price elasticities using three simple functions:
 ```jl
-results = estimateFRAC(data = df, linear= "prices", nonlinear = "prices", se_type = "robust")
-own_price_elasticities = price_elasticities(frac_results = results, data = df, linear = "prices", nonlinear = "prices", which = "own") 
+problem = define_problem(data = df, 
+            linear = ["prices", "x"], 
+            nonlinear = ["prices", "x"],
+            fixed_effects = ["market_ids"],
+            se_type = "robust", 
+            constrained = true);
+
+estimate!(problem)
+
+price_elasticities!(problem; monte_carlo_draws = 100);
 ```
-It is important to note that, (1) currently, you have to restate some options in `price_elasticities` (i.e. `results` does not include information about the specification) and (2) Although `estimateFRAC` is agnostic about the distribution of random coefficients, `price_elasticities` assumes that all random coefficients are normally distributed, as is standard. 
+It is important to note that, although `estimate!` is agnostic about the distribution of random coefficients, `price_elasticities` assumes that all random coefficients are normally distributed, as is standard. One could extend some inner functions called by `price_elasticities` pretty easily to allow for log-normal coefficients. It would just require an intermediate step that maps the estimated mean and standard deviations of the random coefficients to the appropriate parameters of a log-normal distribution.  
 
-## Additional options
-I have added a few additional options in `estimateFRAC`: 
-- `by_var`: Name (as a string) of a variable denoting different (e.g. geographic) regions in which FRAC should be estimated separately. 
-- `product`: When calculating cross-price elasticities, currently you have to set `which = "cross"` and set `product` equal to the `product_ids` value of the product of interest. `price_elasticities` will then return all cross-price elasticities of each observation with respect to `product` (or zero in markets which do not contain `product`). 
-- `constrained`: Boolean variable determining whether the to constrain (1) estimates of the mean preferences for price to be negative and (2) all estiamtes of the variance of random coefficients to be positive. 
-- `fes`: String denoting up to two dimensions of fixed effects. E.g. to absorb `fe1` and `fe2`, set `fes = "fe1 + fe2"`.
-- `cluster_var`: when `se_type = "cluster"`, you must also set `cluster_var` equal to the variable on which you want to cluster standard errors. 
-   
-## Helper functions
-For situations in which one is estimating many `FRAC` models at once, two helpful functions (examples shown in `examples/example1.jl` are:
 
-`plotFRACResults(df; frac_results = [], var = "prices", param = "mean", plot = "hist", by_var = "")`: This plots either a "hist" or a "scatter" plot of all model estimates. If `param = "mean"`, this returns estimates of the mean preferences for characteristic `var`. If `param` is set to anything else, it returns estiamtes of the variance of preferences for `var`.
-
-`extractEstimates(df;frac_results = [], var = "prices", param = "mean", by_var = "")`: For more complicated plots or when the researcher wants to examine the results of `estimateFRAC`, this returns estimated coefficients directly as arrays. For now it only returns standard errors for the unconstrained case, though I may add GMM standard errors for the constrained cases soon. 
-
-# Timing an Example
-Here is a snippet of the example contained in `examples/example1.jl`
-First, I use `FRAC.simulate_logit` to simulate demand for 40000 markets with differing numbers of goods per market 
-```jl
-T = 20000;
-s,p,z,x = simulate_logit(2,T,[-0.4 0.1], [0.5 0.5], 0.3);
-s2,p2,z2,x2 = simulate_logit(4,T,[-0.4 0.1], [0.5 0.5], 0.3);
+## Passing results to PyBLP
+You should be able to save the results as a .csv file using the CSV package. The results can then be loaded in python and passed directly to PyBLP. The only caveat is that my understanding is that people don't like to use unicode characters in python as much as is done in Julia, so you may want to rename the results. An example workflow below:  
+Save results in Julia:
+```julia
+frac_results = problem.estimated_parameters;
+# .... rename dictionary entries as desired
+CSV.write("frac_results.csv", frac_results)
 ```
-This simulates mixed logit (BLP) demand data in which there are two product characteristics `prices` and `x` for which consumers have heterogeneous preferences. I then convert this data to a DataFrame `df` (see example file), define a column `by_example` which randomly divides markets into one of 100 separate regions, and add a variable `dummyFE` which is a meaningess fixed effect simply for demonstration purposes. To estimate 100 separate FRAC models, we can run  
+Load in Python:
+```python
+import pyblp 
+import pandas as pd
+import numpy as np 
 
-```jl 
-julia> @time results = estimateFRAC(data = df, linear= "prices + x", nonlinear = "prices + x",
-           by_var = "by_example", fes = "product_ids + dummy_FE",
-           se_type = "robust", constrained = true)
-Progress: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| Time: 0:00:18
- 39.046212 seconds (115.15 M allocations: 11.935 GiB, 5.30% gc time, 0.01% compilation time)
-```
-Note that here `constrained = true`. So, 100 constrained estimates with two dimenions of FEs takes less than a minute! Note that the progress bar tells how long the command actually spent in estimation, which is only 18 seconds. Unconstrained results are even faster: 
-```jl
-@time results = estimateFRAC(data = df, linear= "prices + x", nonlinear = "prices + x",
-           by_var = "by_example", fes = "product_ids + dummy_FE",
-           se_type = "robust", constrained = false)
-Progress: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| Time: 0:00:07
-  7.643048 seconds (14.19 M allocations: 1.035 GiB, 2.75% gc time, 90.89% compilation time)
+frac_results = pd.read_csv("frac_results.csv", header = False)
+frac_sigma = np.zeros((2,2))
+frac_sigma[0,0] = np.sqrt(frac_results["sigmaSquared_x"])
+frac_sigma[1,1] = np.sqrt(frac_results["sigmaSquared_prices"])
+
+X1 = pyblp.Formulation("1 + x + prices")
+X2 = pyblp.Formulation("0 + x + prices")
+
+problem = pyblp.Problem((X1, X2), product_data)
+
+problem.solve(sigma = frac_sigma)
 ```
 
-## Usage in R
-The package is only really meant to be run in Julia, but I've had recent luck using JuliaConnectoR to use FRAC and other Julia packages in R. To use this, you need to have Julia installed, and then in R run: 
-```r
-install.packages("JuliaConnectoR")
-library("JuliaConnectoR")
-juliaEval('using Pkg')
-juliaEval('Pkg.add(PackageSpec(url = "https://github.com/jamesbrandecon/FRAC.jl"))')
-juliaEval('Pkg.add("DataFrames")')
-```
-These commands install the necessary packages for the following simple example and only need to be run once. Then, after importing your own data as a data.frame called `r_data` with the necessary columns, you can use FRAC directly in R!: 
-```r
-FRAC <- juliaImport("FRAC")
-juliaEval("using DataFrames")
-jl_data <- juliaLet('DataFrames.DataFrame(data);', data = r_data)
-jl_data <- juliaLet('data[!,"by_example"] .=mod.(data.market_ids,2);
-                   data', data = jl_data);
-results <- FRAC$estimateFRAC(data = jl_data, linear= "prices + x", nonlinear = "prices + x",
-                            by_var = "by_example", fes = "product_ids",
-                            se_type = "robust", constrained = F)
-
-own_elasticities <- FRAC$price_elasticities(frac_results = results, data = jl_data,
-                            linear = "prices + x", nonlinear = "prices + x", which = "own",
-                            by_var = "by_example")
-```
-You can see that the syntax here to run FRAC is identical to that of `example1.jl`.  
-
-## To-do
-- Add wild bootstrap-based de-biasing from Salanie and Wolak (2019) 
-- Allow for log-normal distributions for random coefficients 
-- Add options for (random coefficient) nested logit 
+## Notes
+I have currently removed the feature of the package that allowed estimating many models at once. This is for two reasons: first, I'm hoping that it's essentially trivial, given the new package structure, to write a custom loop to do so yourself. Second, I found that it was making the code much less clean and more complicated to debug and develop. I can add it back with good reason. 
