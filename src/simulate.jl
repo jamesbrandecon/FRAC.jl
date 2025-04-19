@@ -1,14 +1,14 @@
 function sim_logit_vary_J(J1, J2, T, B, beta, sd, v; with_market_FEs = false)
     if with_market_FEs
-        s,p,z,x,xi,marketFE = simulate_logit(J1,T,beta, sd, 0.3, with_market_FEs = with_market_FEs);
-        s2,p2,z2,x2,xi2,marketFE2 = simulate_logit(J2,T,beta, sd, 0.3, with_market_FEs = with_market_FEs);
+        s,p,z,x,xi,marketFE = simulate_logit(J1,T,beta, sd, v, with_market_FEs = with_market_FEs);
+        s2,p2,z2,x2,xi2,marketFE2 = simulate_logit(J2,T,beta, sd, v, with_market_FEs = with_market_FEs);
         
         # Reshape data into desired DataFrame, add necessary IVs
         df = reshape_pyblp(toDataFrame(s,p,z,x,xi,marketFE));
         df2 = reshape_pyblp(toDataFrame(s2,p2,z2,x2,xi2,marketFE2));
     else
-        s,p,z,x, xi = simulate_logit(J1,T,beta, sd, 0.3);
-        s2,p2,z2,x2, xi2 = simulate_logit(J2,T,beta, sd, 0.3);
+        s,p,z,x, xi = simulate_logit(J1,T,beta, sd, v);
+        s2,p2,z2,x2, xi2 = simulate_logit(J2,T,beta, sd, v);
 
         # Reshape data into desired DataFrame, add necessary IVs
         df = reshape_pyblp(toDataFrame(s,p,z,x,xi));
@@ -112,8 +112,11 @@ function reshape_pyblp(df::DataFrame; random_constant = false)
     market_ids = df[!, "market_ids"];
     market_ids = repeat(market_ids, size(shares,2));
     
-    market_FEs = df[!, "market_FEs"];
-    market_FEs = repeat(market_FEs, size(shares,2));
+    try 
+        market_FEs = df[!, "market_FEs"];
+        market_FEs = repeat(market_FEs, size(shares,2));
+    catch 
+    end
 
     product_ids = repeat((1:size(shares,2))', size(df,1),1);
     product_ids = dropdims(reshape(product_ids, size(df,1)*size(shares,2),1), dims=2);
@@ -149,6 +152,9 @@ function reshape_pyblp(df::DataFrame; random_constant = false)
         new_df[!,"demand_instruments1"] = demand_instruments1;
     end
     new_df[!,"market_ids"] = market_ids;
-    new_df[!,"market_FEs"] = market_FEs;
+    try 
+        new_df[!,"market_FEs"] = market_FEs;
+    catch 
+    end
     return new_df
 end

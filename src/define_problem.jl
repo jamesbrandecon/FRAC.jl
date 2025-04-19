@@ -38,6 +38,8 @@ function define_problem(;linear::Vector{String}=["prices"], nonlinear::Vector{St
     # Covariance terms
     cov = [];
 
+    data = sort(data, [:market_ids, :product_ids]);
+
     problem = FRACProblem(data,
             linear, 
             nonlinear,

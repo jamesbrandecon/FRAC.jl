@@ -6,9 +6,9 @@ function make_vars(problem, linear::Vector{String}, nonlinear::Vector{String}, s
     end
 
     linear_vars = linear;
-    if linear == "prices"
-        linear_exog_terms = nothing;
-    else
+    linear_exog_vars = nothing;
+    linear_exog_terms = nothing;
+    if linear != ["prices"]
         linear_exog_vars = linear_vars[2:end];
         linear_exog_terms = sum(term.(Symbol.(linear_exog_vars)));
     end

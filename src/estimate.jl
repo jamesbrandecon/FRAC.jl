@@ -29,10 +29,17 @@ function estimate!(problem::FRACProblem)
     if constrained == false
         # Run IV regression(s)
         results = []
+        full_formula = [];
         if by_var ==""
-            results = reg(data, term(:y) ~ (sum(term.(Symbol.(endog_vars))) ~ sum(term.(Symbol.(iv_names)))) + linear_exog_terms + fe_terms, 
+            if !isnothing(linear_exog_terms)
+                full_formula = term(:y) ~ (sum(term.(Symbol.(endog_vars))) ~ sum(term.(Symbol.(iv_names)))) + linear_exog_terms + fe_terms
+            else
+                full_formula = term(:y) ~ (sum(term.(Symbol.(endog_vars))) ~ sum(term.(Symbol.(iv_names)))) + fe_terms
+            end
+            results = reg(data, full_formula, 
                 se, 
-                save = :all, 
+                save = :all,
+                drop_singletons = problem.drop_singletons, 
                 method=method);
             for f ∈ problem.fe_names
                 problem.data[!, "estimatedFE_$(f)"] .= 0.0;
@@ -80,6 +87,7 @@ function estimate!(problem::FRACProblem)
                 results_b = reg(data[data[!,by_var] .== b,:], 
                     term(:y) ~ (sum(term.(Symbol.(endog_vars))) ~ sum(term.(Symbol.(iv_names)))) + linear_exog_terms + fe_terms, 
                     se, save = :all,
+                    drop_singletons = problem.drop_singletons,
                     method = method);
                 # Save standard errors in dictionary
                 by_val_se_dict = Dict()
