@@ -3,6 +3,7 @@ module FRAC
 using DataFrames, FixedEffectModels, LinearAlgebra
 using Statistics, Plots, Optim, Missings
 using ProgressMeter, Suppressor, Random, Distributions, Primes
+using ForwardDiff
 
 # Add helpful extension of addition function
     # This allows us to drop groups of terms from regression when irrelevant

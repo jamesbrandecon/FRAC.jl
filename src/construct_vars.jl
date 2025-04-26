@@ -1,9 +1,15 @@
-function make_vars(problem, linear::Vector{String}, nonlinear::Vector{String}, sigma_cov, 
-    fe_names::Vector{String}, data::DataFrame)
+function compute_combined(gdf, shares_col, value_col)
+    combine(gdf, [shares_col, value_col] => ((x, y) -> sum(x .* y)) => Symbol("e_", value_col))
+end
+
+function make_vars(problem,
+                   linear::Vector{String},
+                   nonlinear::Vector{String},
+                   cov::Vector{Tuple{String,String}},
+                   fe_names::Vector{String},
+                   data::DataFrame)
     
-    if sigma_cov !=[]
-        @assert issymmetric(sigma_cov)
-    end
+    # cov is a vector of pairs for covariance parameters; no symmetry check here
 
     linear_vars = linear;
     linear_exog_vars = nothing;
@@ -36,7 +42,7 @@ function make_vars(problem, linear::Vector{String}, nonlinear::Vector{String}, s
     end
 
     # Construct regressors for variance parameters
-    endog_vars = [];
+    endog_vars = String[];
     for i=1:size(nonlinear_vars,1)
         data[!,"e"] = data[!,nonlinear_vars[i]] .* data[!,"shares"];
         gdf = groupby(data,:market_ids);
@@ -49,14 +55,29 @@ function make_vars(problem, linear::Vector{String}, nonlinear::Vector{String}, s
         data = select!(data, Not(:e_sum))
     end
 
-    # Parameters for covariance parameters: NOT YET IMPLEMENTED
-    if sigma_cov !=[]
-        for i=1:size(nonlinear_vars,1)
-            for j=1:size(nonlinear_vars,1)
-                if sigma_cov[i,j] !=0 
+    # Construct regressors for covariance parameters between random coefficients
+    # (each pair of nonlinear variables)
+    if !isempty(cov)
+        for (v1, v2) in cov
+           # 1) compute market‐share‐weighted means e_v1, e_v2
+           gdf = groupby(data, :market_ids)
+        
+            gdf = groupby(data, :market_ids)
+            cdf1 = compute_combined(gdf, :shares, Symbol(v1))
+            cdf2 = compute_combined(gdf, :shares, Symbol(v2))
 
-                end
-            end
+           data = innerjoin(data, cdf1, on=:market_ids)
+           data = innerjoin(data, cdf2, on=:market_ids)
+
+           # 2) build K_{mn} = X_m X_n – e_m X_n – e_n X_m
+           reg_name = string("K_cov_", v1, "_", v2)
+           data[!, reg_name] =  data[!, v1] .* data[!, v2] .-
+                                data[!, Symbol("e_", v1)] .* data[!, v2] .-
+                                data[!, Symbol("e_", v2)] .* data[!, v1]
+           push!(endog_vars, reg_name)
+
+           # 3) clean up temporary columns
+           select!(data, Not([Symbol("e_", v1), Symbol("e_", v2)]))
         end
     end
 

@@ -1,4 +1,7 @@
 function estimate!(problem::FRACProblem)
+    # Normalize empty `nonlinear` and `fe_names`
+    problem.nonlinear = filter(x -> x != "", problem.nonlinear)
+    problem.fe_names   = filter(x -> x != "", problem.fe_names)
     
     constrained = problem.constrained;
     data = deepcopy(problem.data);
@@ -72,56 +75,76 @@ function estimate!(problem::FRACProblem)
                 index = findfirst(coefnames(results) .== "K_$(i)")
                 push!(estimated_param_dict, param_name => coef(results)[index])
             end
-            problem.estimated_parameters = estimated_param_dict;
-            problem.se = estimated_se_dict;
+            # Covariance parameters for correlated random coefficients
+            for (v1, v2) ∈ problem.cov
+                if !isempty(v1) && !isempty(v2)
+                    # try both orderings
+                    cov_names = ["K_cov_$(v1)_$(v2)", "K_cov_$(v2)_$(v1)"]
+                    idx = findfirst(name -> name in cov_names, coefnames(results))
+                    if idx !== nothing
+                        param_sym = Symbol("σcov_$(v1)_$(v2)")
+                        push!(estimated_param_dict, param_sym => coef(results)[idx])
+                        push!(estimated_se_dict,    param_sym => sqrt(vcov(results)[idx, idx]))
+                    end
+                end
+            end
+
+            problem.estimated_parameters = estimated_param_dict
+            problem.se                   = estimated_se_dict
+
         else
-            by_var_values = unique(data[!,by_var]);
-            p = Progress(length(by_var_values), 1);
-            estimated_param_dict = Dict();
-            estimated_se_dict = Dict();
+            # Estimate FRAC with heterogeneity via interactions
+            # build base endog/iv sums
+            endog = sum(term.(Symbol.(endog_vars)))
+            iv    = sum(term.(Symbol.(iv_names)))
+            # create interaction of each with by_var
+            hetero = (endog & term(by_var)) ~ (iv   & term(by_var))
+            full_formula = term(:y) ~ (endog ~ iv) + fe_terms + hetero
+            if !isnothing(linear_exog_terms)
+                full_formula += linear_exog_terms & term(by_var)
+            end
+
+            results = reg(data, full_formula,
+                se, save = :all,
+                drop_singletons = problem.drop_singletons,
+                method = method)
+
+            # Save residuals and FEs
+            problem.data[!,"xi"] .= residuals(results)
+            estimated_FEs = fe(results)
             for f ∈ problem.fe_names
-                problem.data[!, "estimatedFE_$(f)"] .= 0.0;
+                problem.data[:,"estimatedFE_$(f)"] .=
+                    estimated_FEs[!, findfirst(==(f), problem.fe_names)]
             end
-            for b = by_var_values
-                # Estimate FRAC regression for each by_var value
-                results_b = reg(data[data[!,by_var] .== b,:], 
-                    term(:y) ~ (sum(term.(Symbol.(endog_vars))) ~ sum(term.(Symbol.(iv_names)))) + linear_exog_terms + fe_terms, 
-                    se, save = :all,
-                    drop_singletons = problem.drop_singletons,
-                    method = method);
-                # Save standard errors in dictionary
-                by_val_se_dict = Dict()
-                for i ∈ coefnames(results_b)
-                    ind = findfirst(coefnames(results_b) .== i)
-                    push!(by_val_se_dict, Symbol(i) => sqrt(vcov(results_b)[ind, ind]))
+
+            # Extract all coeffs and SEs (including interactions)
+            estimated_param_dict = Dict()
+            estimated_se_dict    = Dict()
+            for cn in coefnames(results)
+                idx     = findfirst(==(cn), coefnames(results))
+                cval    = coef(results)[idx]
+                seval   = sqrt(vcov(results)[idx, idx])
+
+                if occursin(":", cn)
+                    # heterogeneity term, e.g. "x:GroupA"
+                    parts = split(cn, ":")
+                    base  = parts[1]
+                    lvl   = parts[2]
+                    sym   = Symbol("β_$(base)_by_$(by_var)_$(lvl)")
+                elseif startswith(cn, "K_")
+                    # variance term
+                    sym = Symbol("σ2_$(replace(cn, "K_" => ""))")
+                else
+                    # plain slope
+                    sym = Symbol("β_$(cn)")
                 end
-                # Save residuals in data
-                problem.data[problem.data[!,by_var] .== b,"xi"] .= residuals(results_b);
-                # Save estimated fixed effects in data 
-                estimated_FEs = fe(results_b);
-                for f ∈ problem.fe_names
-                    problem.data[problem.data[!,by_var] .== b,"estimatedFE_$(f)"] .= estimated_FEs[!,findfirst(problem.fe_names .== f)];
-                end
-                
-                next!(p)
-                push!(results, results_b)
-                # Store estimated parameters in a nested dictionary: each dictionary entry is a by_var value, and each value is a dictionary of estimated parameters
-                by_val_dict = Dict();
-                for i ∈ problem.linear
-                    param_name = Symbol("β_$(i)");
-                    index = findfirst(coefnames(results_b) .== i)
-                    push!(by_val_dict, param_name => coef(results_b)[index])
-                end
-                for i∈ problem.nonlinear 
-                    param_name = Symbol("σ2_$(i)");
-                    index = findfirst(coefnames(results_b) .== "K_$(i)")
-                    push!(by_val_dict, param_name => coef(results_b)[index])
-                end
-                push!(estimated_param_dict, b => by_val_dict)
-                push!(estimated_se_dict, b => by_val_se_dict)
+
+                push!(estimated_param_dict, sym => cval)
+                push!(estimated_se_dict,    sym => seval)
             end
-            problem.estimated_parameters = estimated_param_dict;
-            problem.se = estimated_se_dict;
+
+            problem.estimated_parameters = estimated_param_dict
+            problem.se                   = estimated_se_dict
         end
     else
         # Estimate via constrained GMM
@@ -153,7 +176,7 @@ function estimate!(problem::FRACProblem)
                 else
                     param_name = Symbol("σ2_$(var_name)");
                     push!(estimated_param_dict, param_name => results[1][index])
-                end 
+                end
             end
         end
         problem.estimated_parameters = estimated_param_dict;

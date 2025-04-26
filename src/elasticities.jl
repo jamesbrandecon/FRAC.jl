@@ -57,6 +57,10 @@ function all_elasticities(problem::FRACProblem,
     by_value = nothing, 
     raw_draws = [])
 
+    # Normalize empty `nonlinear` and `fe_names`
+    problem.nonlinear = filter(x -> x != "", problem.nonlinear)
+    problem.fe_names   = filter(x -> x != "", problem.fe_names)
+
     linear_vars = problem.linear;
     nonlinear_vars = problem.nonlinear;
     by_var = problem.by_var;
@@ -123,43 +127,48 @@ function all_elasticities(problem::FRACProblem,
 
         # Find index of product of interest
         if prod_ind != []
-            # Individual-level utilities and sums of exp(u) for market m
-            # u_i_m = u_i[u_i.market_ids .==m,:]; 
-            # u_sums_m = u_sums[u_sums.market_ids .==m,:];
-
             # Market-specific individual-level shares
             shares_i_m = shares_i[data.market_ids .==m,:];
             alpha_i_m = Matrix(alpha_i[data.market_ids .==m, :])[1,:];
             alpha_i_m = reshape(alpha_i_m, (1, length(alpha_i_m)))
-            # if m∈[1,3]
-            #     @show m prod_ind
-            # end
 
             # Now construct elasticities for market m
                 # ∂s_k / ∂p_j, k==`product` (function input), j==all other products
-                # @show size(alpha_i_m .* shares_i[prod_ind,:] .* (1 .- shares_i[prod_ind,:]));
             elast_m = df_m.prices ./ df_m[prod_ind,"shares"] .* mean(-1 .* alpha_i_m .* shares_i_m .* shares_i_m[prod_ind,:],dims=2);
             elast_m[prod_ind] = df_m[prod_ind,"prices"] ./ df_m[prod_ind,"shares"] .* mean(alpha_i_m .* shares_i_m[prod_ind,:] .* (1 .- shares_i_m[prod_ind,:]),dims=2);
             elast_vec[data[!,"market_ids"].==m,:] = elast_m;
-            # if m∈[1,3]
-            #     @show m elast_m shares_i_m shares_i[prod_ind,:]
-            # end
         end
     end
     return elast_vec;
 end
 
 """
-    price_elasticities!(problem::FRACProblem)
+    price_elasticities!(problem::FRACProblem;
+        monte_carlo_draws::Int=50,
+        draw_method::Symbol=:normal,
+        antithetic::Bool=false,
+        common_draws::Bool=false,
+        halton_skip::Int=500)
 
-This function takes a `FRACProblem` as the sole required argument and modifies the `FRACProblem.all_elasticities` property inplace,
-replacing the (usually empty) array there with a Vector. Each element of the Vector is a Tuple of two values. 
-The first value of the Tuple is a `market_id`. The second is a matrix of price elasticities, where the (i,j)
-element of each matrix represents the elasticity of demand for product i with respect to the price of product j 
-where `market_ids`==m.
+Compute and store the full matrix of own- and cross-price elasticities for each market.
+Additional keyword arguments control the Monte Carlo draws:
+  • draw_method=:normal or :halton
+  • antithetic=true to use antithetic normals (only for :normal)
+  • common_draws=true to use the same draws across all markets
+  • halton_skip sets the skip (burn-in) for Halton sequences
 """
-function price_elasticities!(problem::FRACProblem; monte_carlo_draws = 50)
-    J = length(unique(problem.data.product_ids));
+function price_elasticities!(problem::FRACProblem;
+        monte_carlo_draws::Int=50,
+        draw_method::Symbol=:normal,
+        antithetic::Bool=false,
+        common_draws::Bool=false,
+        halton_skip::Int=500)
+
+    # Normalize empty `nonlinear` and `fe_names`
+    problem.nonlinear = filter(x -> x != "", problem.nonlinear)
+    problem.fe_names   = filter(x -> x != "", problem.fe_names)
+
+    J = length(unique(problem.data.product_ids))
     M = length(unique(problem.data.market_ids));
 
     # Initialize Array which will hold all elasticities
@@ -169,7 +178,19 @@ function price_elasticities!(problem::FRACProblem; monte_carlo_draws = 50)
     end
 
     # Make draws for random coefficients
-    raw_draws = make_draws(problem.data, monte_carlo_draws, length(problem.nonlinear))
+    raw_draws = make_draws(
+        problem.data,
+        monte_carlo_draws,
+        length(problem.nonlinear);
+        method = draw_method,
+        antithetic = antithetic,
+        common_draws = common_draws,
+        skip = halton_skip
+    )
+    # If correlated random coefficients specified, transform raw draws accordingly
+    if any(p -> p[1] != "" && p[2] != "" , problem.cov)
+        raw_draws = correlate_draws(raw_draws, problem.data, problem.nonlinear, problem.cov, problem.estimated_parameters)
+    end
 
     elast_size_J = []
     # Loop over j=1:J to get all elasticities with respect to each good.  

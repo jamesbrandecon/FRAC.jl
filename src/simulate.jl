@@ -12,11 +12,12 @@ function sim_logit_vary_J(J1, J2, T, B, beta, sd, v; with_market_FEs = false)
 
         # Reshape data into desired DataFrame, add necessary IVs
         df = reshape_pyblp(toDataFrame(s,p,z,x,xi));
-        df2 = reshape_pyblp(toDataFrame(s2,p2,z2,x2, xi2));
+        df2 = reshape_pyblp(toDataFrame(s2,p2,z2,x2,xi2));
     end
 
     df2[!,"product_ids"] = df2.product_ids .+ 2;
-    df2[!,"market_ids"] = df2.market_ids .+ T .+1;
+    # Shift second block's market IDs to continue after first T markets
+    df2[!,"market_ids"] = df2.market_ids .+ T;
     df = [df;df2]
     df[!,"by_example"] = mod.(1:size(df,1),B); # Generate variable indicating separate geographies
     df[!,"demand_instruments1"] = df.demand_instruments0.^2;
@@ -30,8 +31,8 @@ function sim_logit_vary_J(J1, J2, T, B, beta, sd, v; with_market_FEs = false)
     # df[!,"demand_instruments3"] = (df.demand_instruments0 - sums.demand_instruments0_sum).^2;
     # df[!,"demand_instruments4"] = (df.x - sums.x_sum).^2;
 
-    df[!,"dummy_FE"] .= rand();
-    df[!,"dummy_FE"] = (df.dummy_FE .> 0.5);
+    # Add a dummy fixed-effect column (symbol key ensures column name is a Symbol)
+    df[!, :dummy_FE] = rand(Bool, nrow(df))
 
     return df
 end
@@ -46,9 +47,31 @@ function simulate_logit(J,T, beta, sd, v; with_market_FEs = false)
     # sd = standard deviations of preferences on price and x
     # v = standard deviation of market-product demand shock
     
-        if minimum(size(sd)) != 1
-            sd = cholesky(sd).U;
+    # Shortcut for pure logit when no random coefficients and no noise
+    if all(sd .== 0) && v == 0
+        # draw exogenous variables
+        zt = rand(T, J)
+        xit = zeros(T, J)
+        pt = 2 .* rand(T, J)
+        xt = 2 .* rand(T, J)
+        # compute deterministic logit shares
+        s = zeros(T, J)
+        for t in 1:T
+            U = exp.(beta[1] .* pt[t, :] .+ beta[2] .* xt[t, :] .+ xit[t, :])
+            denom = 1 + sum(U)
+            s[t, :] = U ./ denom
         end
+        if with_market_FEs
+            market_FEs = zeros(T)
+            return s, pt, zt, xt, xit, market_FEs
+        else
+            return s, pt, zt, xt, xit
+        end
+    end
+    # If sd is a covariance matrix, extract upper-triangular factor
+    if isa(sd, AbstractMatrix)
+        sd = cholesky(sd).U
+    end
     
         zt = 0.9 .* rand(T,J) .+ 0.05;
         xit = randn(T,J).*v;
@@ -66,16 +89,20 @@ function simulate_logit(J,T, beta, sd, v; with_market_FEs = false)
             else
                 market_FE = 0;
             end
-            I = 1000;
-            if minimum(size(sd)) != 1
-                beta_i = randn(I,2) * sd;
+            R = 1000
+            K = length(beta)
+            # Draw individual coefficients: always produce R×K
+            if isa(sd, AbstractMatrix)
+                beta_i = randn(R, K) * sd
             else
-                beta_i = randn(I,2) .* sd;
+                sd_mat = repeat(reshape(sd, 1, K), R, 1)
+                beta_i = randn(R, K) .* sd_mat
             end
-            beta_i = beta_i .+ beta;
-            denominator = ones(I,1);
-            for j = 1:1:J
-                denominator = denominator .+ exp.(beta_i[:,1].*pt[t,j] + beta_i[:,2].*xt[t,j] .+ market_FE .+ xit[t,j]);
+            # add population mean
+            beta_i .+= reshape(beta, 1, K)
+            denominator = ones(R)
+            for j = 1:J
+                denominator .+= exp.(beta_i[:,1] .* pt[t,j] .+ beta_i[:,2] .* xt[t,j] .+ market_FE .+ xit[t,j])
             end
             for j = 1:1:J
                 s[t,j] = mean(exp.(beta_i[:,1].* pt[t,j] + beta_i[:,2].*xt[t,j] .+ market_FE .+ xit[t,j])./denominator);
@@ -157,4 +184,114 @@ function reshape_pyblp(df::DataFrame; random_constant = false)
     catch 
     end
     return new_df
+end
+
+# Core function: Compute simulated-market logit shares given pre-drawn coefficients.
+# This function takes coefficient draws as input and is designed to be differentiated by ForwardDiff.
+function _sim_market_share_impl(p::AbstractVector, x::AbstractVector, xi::AbstractVector,
+                                beta_draws::AbstractMatrix; # K x R matrix of draws (K parameters, R draws)
+                                market_FE::Real=0)
+    K, R = size(beta_draws) # K = number of parameters, R = number of draws
+    J = length(p)          # Number of products
+    
+    # Check if dimensions match
+    if K < 2
+        # This implementation assumes at least beta[1] for price and beta[2] for x.
+        # Adjust logic if fewer random coefficients are expected or handled differently.
+        error("beta_draws must have at least 2 rows (for price and x coefficients). Found K=$K.")
+    end
+    if length(x) != J || length(xi) != J
+        error("Input vectors p, x, xi must have the same length J.")
+    end
+
+    # Pre-allocate matrix for exponentiated utilities for each product and draw
+    # exp_utility_draws[j, r] = exp(utility of product j for draw r)
+    exp_utility_draws = zeros(eltype(p), J, R)
+
+    # Calculate exponentiated utilities for all products for each draw
+    for r in 1:R
+        βi = view(beta_draws, :, r) # Get the r-th draw (K x 1 vector)
+        # Assumes βi[1] is coefficient for price (p), βi[2] is for x
+        exp_utility_draws[:, r] .= exp.(βi[1] .* p .+ βi[2] .* x .+ xi .+ market_FE)
+    end
+
+    # Calculate denominator for each draw: 1 (outside option) + sum of exp(utilities)
+    denominator_draws = 1.0 .+ sum(exp_utility_draws, dims=1) # Results in a 1 x R vector
+
+    # Calculate shares for each product by averaging over draws
+    # s_j = mean over r [ exp(u_jr) / (1 + sum_k exp(u_kr)) ]
+    # Element-wise division broadcasts denominator_draws correctly
+    avg_shares = mean(exp_utility_draws ./ denominator_draws, dims=2) # Average across columns (draws)
+
+    return vec(avg_shares) # Return as a J-element vector
+end
+
+
+# Wrapper function: Generates random coefficient draws and calls the implementation function.
+# Useful if only simulated shares are needed for a single market condition.
+function sim_market_share(p::AbstractVector, x::AbstractVector, xi::AbstractVector,
+                          beta::AbstractVector, Σ::AbstractMatrix;
+                          market_FE::Real=0, R::Int=500)
+    # Ensure Σ is valid for MvNormal (e.g., positive semi-definite)
+    # Distributions.jl typically handles PSD checks. Add jitter if needed:
+    # Σ_adj = Σ + Diagonal(fill(eps(Float64), length(beta))) * 1e-9
+    mvn = MvNormal(beta, Σ)
+    beta_draws = rand(mvn, R) # Draw R times, result is K x R matrix
+    return _sim_market_share_impl(p, x, xi, beta_draws; market_FE=market_FE)
+end
+
+
+# Compute price elasticities ∂s_i/∂p_j * p_j/s_i using ForwardDiff.
+# Generates random coefficient draws ONCE and reuses them for base shares and Jacobian calculation
+# to ensure consistency as required by differentiation.
+function sim_price_elasticities(p::AbstractVector, x::AbstractVector, xi::AbstractVector,
+                                beta::AbstractVector, Σ::AbstractMatrix;
+                                market_FE::Real=0, R::Int=500)
+    # Generate random draws ONCE
+    # Σ_adj = Σ + Diagonal(fill(eps(Float64), length(beta))) * 1e-9 # Add jitter if needed
+    mvn = MvNormal(beta, Σ)
+    beta_draws = rand(mvn, R) # Draw R times, result is K x R matrix
+
+    # Define the function to differentiate: calculates shares for a given price vector 'price_vec'
+    # using the fixed, pre-generated beta_draws.
+    share_func = price_vec -> _sim_market_share_impl(price_vec, x, xi, beta_draws; market_FE=market_FE)
+
+    # Calculate base shares using the generated draws and the original prices 'p'
+    s = share_func(p)
+
+    # Calculate Jacobian (matrix of partial derivatives ∂s_i/∂p_j) using ForwardDiff
+    # ForwardDiff computes jacobian(f, x) where f maps R^n -> R^m, result is m x n
+    # Here, f maps R^J -> R^J, so jac is J x J. jac[i, j] = ∂s_i / ∂p_j
+    jac = ForwardDiff.jacobian(share_func, p)
+
+    # Ensure non-zero shares to avoid division by zero in elasticity calculation
+    # Replace zero or very small shares with a small positive number
+    s_safe = max.(s, eps(eltype(s)))
+
+    # Calculate elasticities: E[i, j] = (∂s_i / ∂p_j) * (p_j / s_i)
+    # Use broadcasting: jac is JxJ, p' is 1xJ, s_safe is Jx1
+    # (p' ./ s_safe) creates a JxJ matrix where element [i,j] is p[j]/s_safe[i]
+    elasticities = jac .* (p' ./ s_safe)
+
+    return elasticities
+end
+
+# True elasticities over a DataFrame
+function sim_true_price_elasticities(df::DataFrame, beta::AbstractVector, Σ::AbstractMatrix;
+                                     price_col::Symbol=:prices,
+                                     x_col::Symbol=:x,
+                                     xi_col::Symbol=:xi)
+    out = DataFrame(market_ids=Int[], product_i=Int[], product_j=Int[], elasticity=Float64[])
+    for subdf in groupby(df, :market_ids)
+        p  = subdf[!, price_col]
+        x  = subdf[!, x_col]
+        xi = subdf[!, xi_col]
+        fe = hasproperty(subdf, :market_FEs) ? first(subdf.market_FEs) : 0
+        E  = sim_price_elasticities(p, x, xi, beta, Σ; market_FE=fe)
+        mid, J = first(subdf.market_ids), length(p)
+        for i in 1:J, j in 1:J
+            push!(out, (market_ids=mid, product_i=i, product_j=j, elasticity=E[i,j]))
+        end
+    end
+    return out
 end

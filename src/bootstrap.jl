@@ -239,25 +239,129 @@ function bootstrap!(problem::FRACProblem; nboot = 100, ndraws = 100, approximate
 
 end
 
-function make_draws(data::DataFrame, I::Int, K::Int; seed = 10293)
-    # Set seed for random draws
-    rs = MersenneTwister(seed); #Random.seed(seed);
+function make_draws(data::DataFrame, I::Int, K::Int; seed::Integer = 10293,
+                     method::Symbol = :normal, antithetic::Bool = false,
+                     common_draws::Bool = false, skip::Integer = 500)
+    # Prepare RNG
+    rs = MersenneTwister(seed)
 
-    store_draws = [];
-    for k = 1:K
-        rand_draws = randn(rs, length(unique(data.market_ids)),I);
-        draws_length_of_data = zeros(Float64, size(data,1), I);
-        # @show size(draws_length_of_data)
-        for m ∈ unique(data.market_ids)
-            n = size(draws_length_of_data[data.market_ids .== m,:],1);
-            m_index = findfirst(sort(unique(data.market_ids)) .==m)
-            reshaped_draws = reshape(rand_draws[m_index,:], 1, I);
-            # @show size(reshaped_draws) size(repeat(reshaped_draws,n,1))
-            draws_length_of_data[data.market_ids .== m,:] .= repeat(reshaped_draws,n,1);
+    markets = sort(unique(data.market_ids))
+    n_markets = length(markets)
+    n_obs = size(data,1)
+    store_draws = Vector{Matrix{Float64}}(undef, K)
+
+    for k in 1:K
+        # Generate base draws per market (or common) of size (n_markets x I)
+        if common_draws
+            # draw once and repeat
+            if method == :normal
+                # antithetic sampling if requested
+                if antithetic
+                    half = I ÷ 2
+                    base = randn(rs, half)
+                    base = hcat(base, -base)
+                else
+                    base = randn(rs, I)
+                end
+            elseif method == :halton
+                # use Halton sequence with prime-based base
+                base_seq = Vector{Float64}(undef, I)
+                HaltonDraws!(base_seq, prime(k+1); skip = skip, distr = Normal())
+                base = base_seq
+            else
+                error("Unknown draw method: $(method)")
+            end
+            # replicate for all markets
+            rand_draws = repeat(reshape(base, 1, I), n_markets, 1)
+        else
+            # draw separately for each market
+            if method == :normal
+                if antithetic
+                    half = I ÷ 2
+                    part = randn(rs, n_markets, half)
+                    rand_draws = hcat(part, -part)
+                else
+                    rand_draws = randn(rs, n_markets, I)
+                end
+            elseif method == :halton
+                total = n_markets * I
+                H = Vector{Float64}(undef, total)
+                HaltonDraws!(H, prime(k+1); skip = skip, distr = Normal())
+                rand_draws = reshape(H, n_markets, I)
+            else
+                error("Unknown draw method: $(method)")
+            end
         end
-        push!(store_draws, draws_length_of_data)
+
+        # Map draws to each observation
+        draws_length = zeros(Float64, n_obs, I)
+        for (idx, m) in enumerate(markets)
+            mask = data.market_ids .== m
+            draws_length[mask, :] .= reshape(rand_draws[idx, :], 1, I)
+        end
+        store_draws[k] = draws_length
     end
     return store_draws
+end
+
+"""
+    correlate_draws(raw_draws, data, nonlinear, cov, parameters)
+
+Given independent standard normal draws in `raw_draws` (Vector of matrices length K, size n_obs×I),
+and a full estimated covariance structure in `parameters` (with keys :σ2_var and :σcov_var1_var2),
+returns a new set of draws that exhibit the specified correlations across dimensions.
+"""
+function correlate_draws(raw_draws::Vector{Matrix{Float64}}, data::DataFrame,
+                         nonlinear::Vector{String}, cov::Vector{Tuple{String,String}},
+                         parameters::Dict)
+    # Number of random coefficients
+    K = length(nonlinear)
+    # Build covariance matrix Σ (K×K)
+    Σ = zeros(K, K)
+    for (i, nl) in enumerate(nonlinear)
+        # variance term σ²_nl
+        v = get(parameters, Symbol("σ2_$(nl)"), 0.0)
+        Σ[i, i] = max(v, 0.0)
+    end
+    # Off-diagonal covariances σcov_v1_v2
+    for (v1, v2) in cov
+        if v1 != "" && v2 != ""
+            i = findfirst(nonlinear .== v1)
+            j = findfirst(nonlinear .== v2)
+            if i !== nothing && j !== nothing
+                key = Symbol("σcov_$(v1)_$(v2)")
+                if haskey(parameters, key)
+                    c = parameters[key]
+                    Σ[i, j] = c
+                    Σ[j, i] = c
+                end
+            end
+        end
+    end
+    # Cholesky factor (upper triangular U such that U' * U = Σ)
+    U = cholesky(Σ).U
+    # Prepare correlated draws container
+    new_draws = [zeros(size(raw_draws[1])) for _ in 1:K]
+    markets = sort(unique(data.market_ids))
+    # Transform base draws into correlated draws by market and simulation
+    for m in markets
+        mask = data.market_ids .== m
+        # representative index for this market
+        idx = findfirst(mask)
+        # number of simulation draws
+        I_draws = size(raw_draws[1], 2)
+        # Collect independent draws into matrix Z (I_draws × K)
+        Z = hcat([raw_draws[k][idx, :] for k in 1:K]...)
+        # Apply correlation: Z_corr[i, :] = Z[i, :] * U
+        Z_corr = Z * U
+        n_obs_m = sum(mask)
+        for k in 1:K
+            row_vec = Z_corr[:, k]'
+            block = repeat(reshape(row_vec, 1, I_draws), n_obs_m, 1)
+            new_draws[k][mask, :] = block
+        end
+    end
+    return new_draws
 end
 
 
