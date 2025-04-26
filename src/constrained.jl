@@ -19,6 +19,9 @@ function FRAC_gmm(;data::DataFrame, linear_vars::Vector{String} = [""],
         global price_ind, results
         if num_fes > 0
             data = pre_absorb(data, linear_vars, nonlinear_vars, iv_names, fe_names, drop_singletons);
+            for n in names(data)
+                data[!,n] = convert(Array{Float64,1}, data[!,n])
+            end
         end
 
         # When reg() drops singletons, some residuals are missing

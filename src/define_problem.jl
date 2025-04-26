@@ -1,7 +1,8 @@
 """
-    define_problem(; linear =["prices"], nonlinear = [""], 
+    define_problem(; linear =["prices"], nonlinear = [""],
+        cov = "all" or Vector{Tuple{String,String}},  # accept "all" to auto-pair nonlinear
         data, fixed_effects = [""],
-        se_type = "robust", 
+        se_type = "bootstrap",
         cluster_var = "", constrained::Bool = false,
         drop_singletons = true, gmm_steps = 2, method = :cpu)
 
@@ -9,16 +10,39 @@ This function is used to construct a FRAC problem object. The key inputs are the
 all of which are specified as vectors of strings. The user can also specify the type of standard errors to be used, the cluster variable, 
 whether the model is constrained, and the number of GMM steps to be used. Presently, `method` is not used. 
 """
-function define_problem(;linear::Vector{String}=["prices"], nonlinear::Vector{String} = [""], 
-    data::DataFrame, fixed_effects::Vector{String} = [""],
-    se_type = "bootstrap", 
-    cluster_var = "", constrained::Bool = false,
-    drop_singletons::Bool = true, gmm_steps = 2, method = :cpu)
+function define_problem(; linear::Vector{String} = ["prices"],
+                        nonlinear::Vector{String} = String[],
+                        cov::Union{String, Vector{Tuple{String,String}}} = Tuple{String,String}[],
+                        data::DataFrame,
+                        fixed_effects::Vector{String} = String[],
+                        se_type::String = "bootstrap", 
+                        cluster_var::String = "",
+                        constrained::Bool = false,
+                        drop_singletons::Bool = true,
+                        gmm_steps::Int = 2,
+                        method::Symbol = :cpu)
 
+    # Optional grouping variable (unused here)
     by_var = "";
+    # Covariance terms for random coefficients (pairs of variable names)
+    # cov should be a vector of (var1,var2) pairs indicating which covariances to estimate
 
-    sigma_cov = [];
-    
+    if cov == "all"
+        if isempty(nonlinear) || length(nonlinear) < 2
+            # Need at least two nonlinear variables to form a covariance pair
+            @warn "cov=\"all\" requires at least two nonlinear covariates to generate covariance terms. No covariance terms generated."
+            cov = Tuple{String,String}[] # Ensure cov is the correct type even if empty
+        else
+            # Generate unique pairs (i, j) where j > i (excludes variances and duplicates like (B,A) if (A,B) exists)
+            # e.g., for ["A", "B", "C"], generates [("A", "B"), ("A", "C"), ("B", "C")]
+            cov = [(nonlinear[i], nonlinear[j]) for i in 1:length(nonlinear) for j in (i+1):length(nonlinear)]
+        end
+    end
+
+    if constrained && !isempty(cov)
+        error("Constraints not yet implemented with correlated random coefficients")
+    end
+
     if linear== ""
         error("At least one covariate (price) must enter utility linearly")
     end
@@ -36,34 +60,36 @@ function define_problem(;linear::Vector{String}=["prices"], nonlinear::Vector{St
     fe_terms=[]; endog_vars=[]; iv_names=[]; 
 
     # Covariance terms
-    cov = [];
+    # cov = [("", "")];
 
-    problem = FRACProblem(data,
-            linear, 
-            nonlinear,
-            cov, 
-            by_var,
-            fixed_effects,
-            iv_names, 
-            endog_vars, 
-            linear_exog_terms,
-            fe_terms,
-            se_type, 
-            [],
-            cluster_var, 
-            constrained,
-            drop_singletons, 
-            gmm_steps, 
-            method, 
-            [],
-            [],
-            [],
-            [],
-            []);
+    data = sort(data, [:market_ids, :product_ids]);
+
+    # Initialize FRACProblem; 'cov' stored for covariance regressors
+    problem = FRACProblem(
+        data,
+        linear,
+        nonlinear,
+        cov,
+        by_var,
+        fixed_effects,
+        iv_names,
+        endog_vars,
+        linear_exog_terms,
+        fe_terms,
+        se_type,
+        [],  # se placeholder
+        cluster_var,
+        constrained,
+        drop_singletons,
+        gmm_steps,
+        method,
+        [], [], [], [], []
+    );
     
 
-    linear_exog_vars, linear_exog_terms, nonlinear_vars, 
-    fe_terms, endog_vars, iv_names = make_vars(problem, linear, nonlinear, sigma_cov, fixed_effects, data);
+    # Populate regression variables, including variance and covariance constructs
+    linear_exog_vars, linear_exog_terms, nonlinear_vars,
+    fe_terms, endog_vars, iv_names = make_vars(problem, linear, nonlinear, cov, fixed_effects, data);
 
     problem.linear_exog_terms = linear_exog_terms;
     problem.endog_vars = endog_vars;
@@ -106,12 +132,47 @@ end
 
 
 function Base.show(io::IO, problem::FRACProblem)
-    T = size(unique(problem.data[!,:market_ids]));
-    J = size(unique(problem.data[!,:product_ids]));
+    T = length(unique(problem.data[!,:market_ids]));
+    N = nrow(problem.data);
+    # Calculate average number of products per market
+    avg_J = N / T;
 
-    println(io, "FRAC Problem:")
-    println(io, "- Number of total choices: $(J)")
-    println(io, "- Number of markets: $(T)")
+    println(io, "FRAC Problem Summary:")
+    println(io, "---------------------")
+    println(io, "- Total Observations (N): $(N)")
+    println(io, "- Number of Markets (T): $(T)")
+    println(io, "- Average Products per Market (N/T): $(round(avg_J, digits=2))")
+    println(io, "")
+    println(io, "Model Specification:")
+    println(io, "- Linear Covariates: ", isempty(problem.linear) ? "None" : join(problem.linear, ", "))
+    println(io, "- Nonlinear Covariates (Random Coefficients): ", isempty(problem.nonlinear) ? "None" : join(problem.nonlinear, ", "))
+    if !isempty(problem.cov)
+        cov_str = join(["($(p[1]), $(p[2]))" for p in problem.cov], ", ")
+        println(io, "- Covariance Terms: ", cov_str)
+    else
+        println(io, "- Covariance Terms: None")
+    end
+    println(io, "- Fixed Effects: ", isempty(problem.fe_names) ? "None" : join(problem.fe_names, ", "))
+    println(io, "- Endogenous Variables: ", isempty(problem.endog_vars) ? "None" : join(problem.endog_vars, ", "))
+    # println(io, "- IV Names: ", isempty(problem.iv_names) ? "Not specified/generated yet" : join(problem.iv_names, ", ")) # IVs might be generated later
+    println(io, "")
+    println(io, "Estimation Settings:")
+    println(io, "- Standard Error Type: $(problem.se_type)")
+    if problem.se_type == "cluster"
+        println(io, "- Cluster Variable: $(problem.cluster_var)")
+    end
+    println(io, "- Constrained Estimation: $(problem.constrained)")
+    println(io, "- Drop Singletons: $(problem.drop_singletons)")
+    println(io, "- GMM Steps: $(problem.gmm_steps)")
+    # println(io, "- Method: $(problem.method)") # Currently unused
 
+    # Optionally, indicate if results are available
+    if !isempty(problem.estimated_parameters)
+        println(io, "")
+        println(io, "Status: Estimation results available.")
+    else
+        println(io, "")
+        println(io, "Status: Problem defined, not yet estimated.")
+    end
 end
 
