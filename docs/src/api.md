@@ -37,12 +37,8 @@ Order = [
   define_problem,
   estimate!,
   bootstrap!,
-  get_FEs!,
   price_elasticities!,
-  inner_price_elasticities,
-  all_elasticities,
   get_elasticities,
-  own_elasticities,
-  correlate_draws
+  own_elasticities
 ]
 ```
