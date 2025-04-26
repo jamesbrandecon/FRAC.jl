@@ -39,6 +39,10 @@ function define_problem(; linear::Vector{String} = ["prices"],
         end
     end
 
+    if constrained && !isempty(cov)
+        error("Constraints not yet implemented with correlated random coefficients")
+    end
+
     if linear== ""
         error("At least one covariate (price) must enter utility linearly")
     end

@@ -3,10 +3,10 @@ using Statistics
 
 # Simulation settings
 nsim = 1000
-J1, J2, T, B = 5, 5, 200, 1
+J1, J2, T, B = 20, 20, 500, 1
 β = [-2.0, 1.5]
 Σ = [0.5 0.3; 0.3 0.8]
-ξ_var = 0.01
+ξ_var = 0.3
 
 # storage for all elasticity pairs
 all_elast = DataFrame(mse=Float64[], mape=Float64[], 
@@ -66,7 +66,6 @@ for s in 1:nsim
       data          = select(df, Not(:demand_instruments3)),
       linear        = ["prices","x"],
       nonlinear     = ["prices","x"],
-    #   cov           = [("prices","x")],
       fixed_effects = ["product_ids"],
       se_type       = "bootstrap",
       constrained   = false
@@ -94,106 +93,190 @@ for s in 1:nsim
         betap = problem_nocov.estimated_parameters[:β_prices],
         σ2x  = problem_nocov.estimated_parameters[:σ2_x],
         σ2p  = problem_nocov.estimated_parameters[:σ2_prices],
-        σcov = 0;#problem.estimated_parameters[:σcov_prices_x]
+        σcov = 0; 
     ))
+
+    # track progress
     print(".")
 end
 
-function cov_plots(result_obj)
-        p1 = histogram(
-            result_obj.σ2x,
+function cov_plots(without_cov, with_cov)
+    # Plot for σ²_x
+    p1 = histogram(
+        with_cov.σ2x,
         bins=30,
-        label="Estimated Distribution",
+        label="With Cov",
         xlabel="σ²_x",
         ylabel="Frequency",
         title="Estimated σ²_x",
         color=:skyblue, # Assign a color for this histogram
         legend=:topright
     )
+    histogram!(p1,
+        without_cov.σ2x,
+        bins=30,
+        label="Without Cov",
+        color=:lightcoral, # Assign a different color
+        alpha=0.5
+    )
     vline!(p1, [Σ[2,2]], color=:red, linestyle=:dash, linewidth=2, label="True Value")
 
     # Plot for σ²_prices
     p2 = histogram(
-        result_obj.σ2p,
+        with_cov.σ2p,
         bins=30,
-        label="Estimated Distribution",
+        label="With Cov",
         xlabel="σ²_prices",
         ylabel="Frequency",
         title="Estimated σ²_prices",
-        color=:lightgreen, # Assign a different color
+        color=:skyblue, # Assign a different color
         legend=:topright
+    )
+     histogram!(p2,
+        without_cov.σ2p,
+        bins=30,
+        label="Without Cov",
+        color=:lightcoral, # Assign a different color
+        alpha=0.5
     )
     vline!(p2, [Σ[1,1]], color=:red, linestyle=:dash, linewidth=2, label="True Value")
 
     # Plot for σ_cov(prices, x)
     p3 = histogram(
-        result_obj.σcov,
+        with_cov.σcov,
         bins=30,
-        label="Estimated Distribution",
+        label="With Cov",
         xlabel="σ_cov(prices, x)",
         ylabel="Frequency",
         title="Estimated σ_cov(prices, x)",
-        color=:lightcoral, # Assign another different color
+        color=:skyblue, # Assign another different color
         legend=:topright
+    )
+    vline!(p3,
+        [0],
+        bins=30,
+        label="Without Cov",
+        color=:lightcoral, # Assign a different color
+        alpha=1.0, 
+        linestyle=:solid
     )
     vline!(p3, [Σ[1,2]], color=:red, linestyle=:dash, linewidth=2, label="True Value")
 
     # Combine plots into a single figure with a layout and an overall title
     p_out = plot(p1, p2, p3,
         layout = (3, 1),          # Arrange plots vertically
-        size = (700, 900),        # Adjust figure size as needed
-        plot_title = "Distribution of Estimated Var/Covar Params" # Overall title
+        size = (700, 900)        # Adjust figure size as needed
+        # plot_title = "Distribution of Estimated Var/Covar Params" # Overall title
         )
     return p_out
 end
 
-cov_plots(all_elast_nocov)
-cov_plots(all_elast)
+function beta_plots(without_cov, with_cov)
+    p1 = histogram(
+        with_cov.betax,
+        bins=30,
+        label="With Cov",
+        xlabel="β_x",
+        ylabel="Frequency",
+        title="Estimated β_x",
+        color=:skyblue, # Assign a color for this histogram
+        legend=:topright
+    )
+    histogram!(p1,
+        without_cov.betax,
+        bins=30,
+        label="Without Cov",
+        color=:lightcoral, # Assign a different color
+        alpha=0.5
+    )
+    vline!(p1, [β[2]], color=:red, linestyle=:dash, linewidth=2, label="True Value")
 
+    # Plot for σ²_prices
+    p2 = histogram(
+        with_cov.betap,
+        bins=30,
+        label="With Cov",
+        xlabel="β_prices",
+        ylabel="Frequency",
+        title="Estimated β_prices",
+        color=:skyblue, # Assign a different color
+        legend=:topright
+    )
+    histogram!(p2,
+        without_cov.betap,
+        bins=30,
+        label="Without Cov",
+        color=:lightcoral, # Assign a different color
+        alpha=0.5
+    )
+    vline!(p2, [β[1]], color=:red, linestyle=:dash, linewidth=2, label="True Value")
 
-histogram(
-    all_elast.mse;
-    bins=30, xlabel="MSE", ylabel="Count",
-    title="Mean Squared Error of Price Elasticities", legend=false
-    )
+    # Combine plots into a single figure with a layout and an overall title
+    p_out = plot(p1, p2,
+        layout = (2, 1),          # Arrange plots vertically
+        size = (700, 900)        # Adjust figure size as needed
+        # plot_title = "Distribution of Estimated Var/Covar Params" # Overall title
+        )
+    return p_out
+end
 
-histogram(
-    all_elast.mape;
-    bins=30, xlabel="MAPE", ylabel="Count",
-    title="Mean Absolute Percentage Error of Price Elasticities", 
-    label="With Cov Estiamtion", 
-    normalize = :density, 
-    alpha = 0.5,
-    color = :lightgreen
-    )
-histogram!(
-    all_elast_nocov.mape;
-    bins=30, 
-    xlabel="MAPE", ylabel="Count",
-    label="Without Cov Estimation", 
-    normalize = :density, 
-    alpha = 0.5, 
-    color = :skyblue
-    )
+function accuracy_plots(without_cov, with_cov)
 
-histogram(
-    all_elast.mse;
-    bins=30, xlabel="MSE", ylabel="Count",
-    title="Mean Absolute Percentage Error of Price Elasticities", 
-    label="With Cov Estiamtion", 
-    normalize = :density, 
-    alpha = 0.5,
-    color = :lightgreen
-    )
-histogram!(
-    all_elast_nocov.mse;
-    bins=30, 
-    xlabel="MSE", ylabel="Count",
-    label="Without Cov Estimation", 
-    normalize = :density, 
-    alpha = 0.5, 
-    color = :skyblue
-    )
+    p1 = histogram(
+        all_elast.mape;
+        bins=30, xlabel="MAPE", ylabel="Count",
+        title="Mean Absolute Percentage Error of Price Elasticities", 
+        label="With Cov Estiamtion", 
+        normalize = :density, 
+        alpha = 0.5,
+        color = :skyblue
+        )
+    histogram!(
+        p1,
+        all_elast_nocov.mape;
+        bins=30, 
+        xlabel="MAPE", ylabel="Count",
+        label="Without Cov", 
+        normalize = :density, 
+        alpha = 0.5, 
+        color = :lightcoral
+        )
+
+    p2 = histogram(
+        all_elast.mse;
+        bins=30, xlabel="MSE", ylabel="Count",
+        title="Mean Squared Error of Price Elasticities", 
+        label="With Cov", 
+        normalize = :density, 
+        alpha = 0.5,
+        color = :skyblue
+        )
+    histogram!(
+        p2,
+        all_elast_nocov.mse;
+        bins=30, 
+        xlabel="MSE", ylabel="Count",
+        label="Without Cov Estimation", 
+        normalize = :density, 
+        alpha = 0.5, 
+        color = :lightcoral
+        )
+    
+    return plot(p1, p2,
+        layout = (2, 1),          # Arrange plots vertically
+        size = (700, 900)        # Adjust figure size as needed
+        # plot_title = "Distribution of Estimated Var/Covar Params" # Overall title
+        )
+end
+
+# -------------------------------------
+# Make plots 
+# -------------------------------------
+cov_plots(all_elast_nocov, all_elast)
+
+beta_plots(all_elast_nocov, all_elast)
+
+accuracy_plots(all_elast_nocov, all_elast)
 
 scatter(
     all_elast_nocov.mape, all_elast.mape;
@@ -215,51 +298,3 @@ plot!(
     color=:red, linestyle=:dash, linewidth=2,
     label="45 degree line"
     )
-
-histogram(
-    all_elast.betax;
-    bins=30, xlabel="β_x", ylabel="Count",
-    title="Estimated β_x", 
-    label = "With Cov Estimation", alpha = 0.4
-    )
-histogram!(
-    all_elast_nocov.betax;
-    bins=30, xlabel="β_x", ylabel="Count",
-    title="Estimated β_x", 
-    label = "Without Cov Estimation", alpha = 0.4
-    )
-vline!([β[2]]; color=:red, linestyle=:dash, linewidth=2)
-
-histogram(
-    all_elast.betap;
-    bins=30, xlabel="β_prices", ylabel="Count",
-    title="Estimated β_prices", 
-    label = "With Cov Estimation",alpha = 0.4
-    )
-histogram!(
-    all_elast_nocov.betap;
-    bins=30, xlabel="β_prices", ylabel="Count",
-    title="Estimated β_prices", 
-    label = "Without Cov Estimation", alpha = 0.4
-    )
-vline!([β[1]]; color=:red, linestyle=:dash, linewidth=2)
-
-# Plot variance and covariance parameters
-
-# Plot for σ²_x
-
-# If you want to save the combined plot:
-# savefig("examples/variance_covariance_distributions.png")
-
-
-
-
-# scatter and error histogram
-scatter(all_elast.truth, all_elast.est;
-  xlabel="True elasticity", ylabel="Estimated elasticity",
-  title="Estimated vs True Price Elasticities", legend=false, alpha=0.2)
-savefig("examples/elasticity_scatter.png")
-
-histogram((all_elast.est .- all_elast.truth).^2;
-  bins=30, xlabel="Est – True", title="Elasticity Estimation Error", legend=false)
-savefig("examples/elasticity_error_hist.png")
