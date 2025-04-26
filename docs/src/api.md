@@ -5,8 +5,6 @@ Modules = [FRAC]
 Order = [
   get_elasticities,
   define_problem,
-  HaltonDraws!,
-  HaltonSeq!,
   bootstrap!,
   pre_absorb,
   get_FEs!,
