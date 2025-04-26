@@ -47,5 +47,7 @@ include("elasticities.jl")
 # plot
 
 export estimateFRAC, plotFRACResults, extractEstimates, simulate_logit, toDataFrame, reshape_pyblp,
-    define_problem, estimate!, price_elasticities!, own_elasticities, bootstrap!, get_elasticities
+    define_problem, FRACProblem, estimate!, bootstrap!, get_FEs!, price_elasticities!,
+    inner_price_elasticities, all_elasticities, get_elasticities, own_elasticities,
+    correlate_draws, HaltonDraws!, HaltonSeq!, pre_absorb
 end
