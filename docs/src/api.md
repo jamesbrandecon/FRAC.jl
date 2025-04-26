@@ -34,20 +34,18 @@
 ```@autodocs
 Modules = [FRAC]
 Order = [
-  estimate!,
-  bootstrap!,
-  price_elasticities!,
-  own_elasticities, 
-  FRAC.get_elasticities,
-  FRAC.define_problem,
-  FRAC.HaltonDraws!,
-  FRAC.bootstrap!,
-  FRAC.get_FEs!,
-  FRAC.inner_price_elasticities,
-  FRAC.pre_absorb,
-  FRAC.all_elasticities,
-  FRAC.correlate_draws,
-  FRAC.price_elasticities!,
-  FRAC.HaltonSeq!
+    define_problem,
+    estimate!,
+    bootstrap!,
+    get_FEs!,
+    price_elasticities!,
+    inner_price_elasticities,
+    all_elasticities,
+    get_elasticities,
+    own_elasticities,
+    correlate_draws,
+    HaltonDraws!,
+    HaltonSeq!,
+    pre_absorb
 ]
 ```
