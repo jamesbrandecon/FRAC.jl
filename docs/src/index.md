@@ -1,5 +1,7 @@
 # FRAC.jl
 
+[![Documentation](https://img.shields.io/badge/docs-latest-blue)](https://jamesbrand.github.io/FRAC.jl/)
+
 This package is meant to make the estimation of mixed logit models (with market level data) and the resulting price elasticities trivially easy. The package estimates an approximation of these models which was developed by [Salanie and Wolak (2022)](https://economics.sas.upenn.edu/system/files/2022-04/Econometrics%2004112022.pdf).
 
 In many cases, the approximation offered by the package is sufficient to estimate price elasticities reasonably accurately. In other cases, results from FRAC.jl may be used as a starting point for other packages, such as [PyBLP](https://pyblp.readthedocs.io/en/stable/). The estimation results are saved in a dictionary for ease of reading and saving.   
@@ -12,6 +14,52 @@ Dict{Any, Any} with 4 entries:
   :β_prices  => -1.0184
   :σ2_prices => 0.0839573
 ```
+
+## Installation
+
+```julia
+# From the REPL:
+] add FRAC
+```
+
+## Quick Start
+
+```julia
+using FRAC, DataFrames, CSV
+
+# 1. Define your problem
+problem = define_problem(
+  data          = your_df,               
+  linear        = ["prices", "x"],
+  nonlinear     = ["prices", "x"],
+  fixed_effects = ["market_ids"],
+  se_type       = "bootstrap"
+)
+
+# 2. Estimate parameters
+estimate!(problem)
+
+# 3. Compute price elasticities
+price_elasticities!(problem; monte_carlo_draws=100)
+own_df = own_elasticities(problem)
+```
+
+## Features
+
+- Unconstrained IV‑style FRAC approximation  
+- GMM‑based constrained estimation  
+- Support for random coefficients & covariance terms  
+- Flexible standard errors: simple, robust, cluster, bootstrap  
+- Built‑in Monte Carlo price elasticities  
+- Easy export to CSV / PyBLP workflows  
+
+## Next Steps
+
+- 📖 [Usage Example](usage.md)  
+- ⚙️ [API Reference](api.md)  
+- 🔧 [Examples Gallery](examples.md)  
+- ❗ [Troubleshooting](troubleshooting.md)  
+- 📚 [Theory](theory.md)   
 
 ## Passing results to PyBLP
 You should be able to save the results as a .csv file using the CSV package. The results can then be loaded in python and passed directly to PyBLP. The only caveat is that my understanding is that people don't like to use unicode characters in python as much as is done in Julia, so you may want to rename the results. An example workflow below:  
