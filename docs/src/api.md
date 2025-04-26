@@ -35,7 +35,6 @@
 Modules = [FRAC]
 Order = [
   define_problem,
-  FRACProblem,
   estimate!,
   bootstrap!,
   get_FEs!,
