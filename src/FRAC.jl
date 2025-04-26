@@ -32,11 +32,9 @@ function +(a::Nothing,b::Tuple)
 end
 include("define_problem.jl")
 include("estimate.jl")
-include("main_func.jl")
 include("construct_vars.jl")
 include("fixed_effects.jl")
 include("constrained.jl")
-include("unconstrained.jl")
 include("bootstrap.jl")
 
 include("processing.jl")
