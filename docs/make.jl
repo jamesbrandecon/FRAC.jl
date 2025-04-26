@@ -5,7 +5,7 @@ makedocs(
     sitename = "FRAC",
     format = Documenter.HTML(),
     modules = [FRAC], 
-    strict = false,
+    warnonly = true,
     pages = [
         "Home" => "index.md",
         "API" => "api.md"]
