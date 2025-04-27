@@ -4,7 +4,7 @@ using FRACDemand
 makedocs(
     sitename = "FRACDemand.jl",
     format = Documenter.HTML(),
-    modules = [FRAC], 
+    modules = [FRACDemand], 
     warnonly = true,
     pages = [
         "Home" => "index.md",
