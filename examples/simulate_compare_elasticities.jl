@@ -1,4 +1,4 @@
-using FRAC, Random, DataFrames, Plots
+using FRACDemand, Random, DataFrames, Plots
 using Statistics
 
 # Simulation settings
@@ -18,7 +18,7 @@ all_elast_nocov = DataFrame(mse=Float64[], mape=Float64[],
 for s in 1:nsim
     Random.seed!(s)
     # simulate and reshape
-    df = FRAC.sim_logit_vary_J(J1, J2, T, B, β, Σ, ξ_var)
+    df = FRACDemand.sim_logit_vary_J(J1, J2, T, B, β, Σ, ξ_var)
     df[!,"demand_instruments3"] .= df.demand_instruments0 .* df.demand_instruments1 .* df.demand_instruments2
 
     # set up IV and estimate
@@ -34,7 +34,7 @@ for s in 1:nsim
     estimate!(problem)
 
     # true elasticities
-    truth = FRAC.sim_true_price_elasticities(df, β, Σ)
+    truth = FRACDemand.sim_true_price_elasticities(df, β, Σ)
 
     # estimated elasticities
     est_elast = DataFrame(market_ids=Int[], product_i=Int[], product_j=Int[], elasticity=Float64[])
@@ -42,7 +42,7 @@ for s in 1:nsim
         p, x, xi = subdf.prices, subdf.x, subdf.xi
         fe = "market_FEs" in names(subdf) ? first(subdf.market_FEs) : 0
         βhat = [problem.estimated_parameters[:β_prices], problem.estimated_parameters[:β_x]]
-        Ehat = FRAC.sim_price_elasticities(p, x, xi, βhat, Σ; market_FE=fe)
+        Ehat = FRACDemand.sim_price_elasticities(p, x, xi, βhat, Σ; market_FE=fe)
         mid, J = first(subdf.market_ids), length(p)
         for i in 1:J, j in 1:J
             push!(est_elast, (market_ids=mid, product_i=i, product_j=j, elasticity=Ehat[i,j]))
@@ -78,7 +78,7 @@ for s in 1:nsim
         p, x, xi = subdf.prices, subdf.x, subdf.xi
         fe = "market_FEs" in names(subdf) ? first(subdf.market_FEs) : 0
         βhat = [problem_nocov.estimated_parameters[:β_prices], problem_nocov.estimated_parameters[:β_x]]
-        Ehat = FRAC.sim_price_elasticities(p, x, xi, βhat, Σ; market_FE=fe)
+        Ehat = FRACDemand.sim_price_elasticities(p, x, xi, βhat, Σ; market_FE=fe)
         mid, J = first(subdf.market_ids), length(p)
         for i in 1:J, j in 1:J
             push!(est_elast, (market_ids=mid, product_i=i, product_j=j, elasticity=Ehat[i,j]))

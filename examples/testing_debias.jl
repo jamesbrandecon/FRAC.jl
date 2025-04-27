@@ -1,7 +1,7 @@
 using LinearAlgebra, Statistics
 using Plots, DataFrames
 
-using FRAC
+using FRACDemand
 
 Plots.theme(:ggplot2) # Change Plots.jl theme
 
@@ -16,7 +16,7 @@ debias_estimates = []
 for i = 1:25
     mean_utility_params = [-1 1];
     random_coefficient_sd = [0.3 0.3];
-    df = FRAC.sim_logit_vary_J(J1, J2, T, 1, mean_utility_params, random_coefficient_sd, 0.3, with_market_FEs = true);
+    df = FRACDemand.sim_logit_vary_J(J1, J2, T, 1, mean_utility_params, random_coefficient_sd, 0.3, with_market_FEs = true);
 
     problem = define_problem(data = df, 
                 linear = ["prices", "x"], 

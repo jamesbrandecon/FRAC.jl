@@ -1,4 +1,4 @@
-using FRAC, Random, DataFrames, Plots
+using FRACDemand, Random, DataFrames, Plots
 
 # Simulation settings
 nsim = 100

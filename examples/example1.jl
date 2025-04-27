@@ -2,7 +2,7 @@ using LinearAlgebra, Statistics
 using BenchmarkTools
 using Plots, DataFrames
 
-using FRAC
+using FRACDemand
 
 Plots.theme(:ggplot2) # Change Plots.jl theme
 
@@ -16,7 +16,7 @@ T = 2000; # number of markets/2
 J1 = 2; # number of products in half of markets
 J2 = 4; # number of products in the other half of markets
 
-df = FRAC.sim_logit_vary_J(J1, J2, T, B, [-1 1], [0.3 0.3], 0.3, with_market_FEs = true);
+df = FRACDemand.sim_logit_vary_J(J1, J2, T, B, [-1 1], [0.3 0.3], 0.3, with_market_FEs = true);
 
 # Define and estimate two problems: one constrained, another unconstrained
 # NOTE: I recommend using se_type = "bootstrap" for all problems, as other standard errors seem to be biased downward

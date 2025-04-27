@@ -1,6 +1,6 @@
-# FRAC.jl
+# FRACDemand.jl
 
-[![Documentation](https://img.shields.io/badge/docs-latest-blue)](https://jamesbrand.github.io/FRAC.jl/)
+[![Documentation](https://img.shields.io/badge/docs-latest-blue)](https://jamesbrand.github.io/FRACDemand.jl/)
 
 This package is meant to make the estimation of mixed logit models (with market level data) and the resulting price elasticities trivially easy. The package estimates an approximation of these models which was developed by [Salanie and Wolak (2022)](https://economics.sas.upenn.edu/system/files/2022-04/Econometrics%2004112022.pdf).
 
@@ -25,7 +25,7 @@ Dict{Any, Any} with 4 entries:
 ## Quick Start
 
 ```julia
-using FRAC, DataFrames, CSV
+using FRACDemand, DataFrames, CSV
 
 # 1. Define your problem
 problem = define_problem(

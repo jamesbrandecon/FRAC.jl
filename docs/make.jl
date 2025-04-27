@@ -2,7 +2,7 @@ using Documenter
 using FRAC
 
 makedocs(
-    sitename = "FRAC.jl",
+    sitename = "FRACDemand.jl",
     format = Documenter.HTML(),
     modules = [FRAC], 
     warnonly = true,
@@ -12,7 +12,7 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/jamesbrandecon/FRAC.jl.git",
+    repo = "github.com/jamesbrandecon/FRACDemand.jl.git",
     push_preview = true,
     devbranch = "main"
 )
