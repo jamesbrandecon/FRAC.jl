@@ -1,5 +1,5 @@
 using Documenter
-using FRAC
+using FRACDemand
 
 makedocs(
     sitename = "FRACDemand.jl",
