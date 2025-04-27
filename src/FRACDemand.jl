@@ -1,4 +1,4 @@
-module FRAC
+module FRACDemand
 
 using DataFrames, FixedEffectModels, LinearAlgebra
 using Statistics, Plots, Optim, Missings

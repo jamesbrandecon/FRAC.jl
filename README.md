@@ -1,9 +1,6 @@
-# FRAC.jl
+# FRACDemand.jl
 
-[![](https://img.shields.io/badge/docs-stable-blue.svg)](https://jamesbrandecon.github.io/FRAC.jl)
-(Note: docs link not yet working)
-
-Consider this package a beta version, and let me know if you encounter issues. I have recently begun re-writing most of the package from scratch. The link above will send you to a short docs website to explain the usage of the package. 
+[![](https://img.shields.io/badge/docs-stable-blue.svg)](https://jamesbrandecon.github.io/FRACDemand.jl)
 
 This package estimates mixed logit demand models using the fast, "robust", and approximately correct (FRAC) approach developed by [Salanie and Wolak (2022)](https://economics.sas.upenn.edu/system/files/2022-04/Econometrics%2004112022.pdf). The current version of the code assumes that random coefficients on product characteristics are independent of each other and normally distributed. Each of these can be relaxed in the future, the former very easily.
 
@@ -11,11 +8,11 @@ This package estimates mixed logit demand models using the fast, "robust", and a
 I hope to add things to the package and debug as needed, so install directly from Github: 
 ```jl
 using Pkg
-Pkg.add(url = "https://github.com/jamesbrandecon/FRAC.jl")
+Pkg.add(url = "https://github.com/jamesbrandecon/FRACDemand.jl")
 ```
 
 ## Basic Usage
-FRAC.jl requires a DataFrame as input which contains columns `shares`, `market_ids`, `product_ids`, `demand_instruments` (numbered from 0) and any relevant product characteristics. A minimal example, in which price is the only characteristic, would look like: 
+FRACDemand.jl requires a DataFrame as input which contains columns `shares`, `market_ids`, `product_ids`, `demand_instruments` (numbered from 0) and any relevant product characteristics. A minimal example, in which price is the only characteristic, would look like: 
 ```jl
 julia> first(select(df, [:prices, :shares, :product_ids, :market_ids, :demand_instruments0, :demand_instruments1]))
 DataFrameRow
