@@ -3,7 +3,7 @@ module FRACDemand
 using DataFrames, FixedEffectModels, LinearAlgebra
 using Statistics, Plots, Optim, Missings
 using ProgressMeter, Suppressor, Random, Distributions, Primes
-using ForwardDiff
+using ForwardDiff, QuasiMonteCarlo
 
 # Add helpful extension of addition function
     # This allows us to drop groups of terms from regression when irrelevant
@@ -40,14 +40,10 @@ include("bootstrap.jl")
 include("processing.jl")
 include("simulate.jl")
 include("elasticities.jl")
-
-# process: 
-# define_problem 
-# estimate!
-# plot
+include("predict.jl")
 
 export estimateFRAC, plotFRACResults, extractEstimates, simulate_logit, toDataFrame, reshape_pyblp,
     define_problem, FRACProblem, estimate!, bootstrap!, get_FEs!, price_elasticities!,
     inner_price_elasticities, all_elasticities, get_elasticities, own_elasticities,
-    correlate_draws, HaltonDraws!, HaltonSeq!, pre_absorb
+    correlate_draws, HaltonDraws!, HaltonSeq!, pre_absorb, predict_shares!
 end

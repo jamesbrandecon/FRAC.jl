@@ -1,3 +1,22 @@
+"""
+    estimate!(problem::FRACProblem)
+
+Estimate and update the solution for the given `FRACProblem` in-place.
+
+# Arguments
+- `problem::FRACProblem`: The problem instance to be estimated and modified.
+
+# Modifies
+- `problem.data`: Adds or updates columns for residuals (`xi`) and estimated fixed effects (`estimatedFE_*`).
+- `problem.estimated_parameters`: Stores estimated parameter values in a dictionary.
+- `problem.se`: Stores estimated standard errors for parameters (if applicable).
+- `problem.raw_results_internal`: Stores raw regression or GMM results.
+- May overwrite or add columns in `problem.data` related to fixed effects and residuals.
+
+# Notes
+- This function mutates the input `problem` object.
+- The specific fields modified depend on the estimation method and options in `problem`.
+"""
 function estimate!(problem::FRACProblem)
     # Normalize empty `nonlinear` and `fe_names`
     problem.nonlinear = filter(x -> x != "", problem.nonlinear)
@@ -39,11 +58,13 @@ function estimate!(problem::FRACProblem)
             else
                 full_formula = term(:y) ~ (sum(term.(Symbol.(endog_vars))) ~ sum(term.(Symbol.(iv_names)))) + fe_terms
             end
+
             results = reg(data, full_formula, 
                 se, 
                 save = :all,
                 drop_singletons = problem.drop_singletons, 
                 method=method);
+
             for f ∈ problem.fe_names
                 problem.data[!, "estimatedFE_$(f)"] .= 0.0;
             end
@@ -183,11 +204,7 @@ function estimate!(problem::FRACProblem)
 
         # Get estimated fixed effects 
         get_FEs!(problem);
-        # for f ∈ problem.fe_names
-        #     problem.data[!,"estimatedFE_$(f)"] .= estimatedFEs[!,findfirst(problem.fe_names .== f)];
-        # end
     end
 
     problem.raw_results_internal = results;
-    
 end

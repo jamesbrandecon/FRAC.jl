@@ -18,8 +18,11 @@
 #     return xi
 # end    
 
-function replace_xi_contraction!(problem::FRACProblem)
-    deltas = run_contraction_mapping(zeros(Float64, size(problem.data,1)), problem)
+function replace_xi_contraction!(problem::FRACProblem; precision = 1e-12, n_draws = 50)
+    deltas = run_contraction_mapping(
+        zeros(Float64, size(problem.data,1)), 
+        problem, 
+        precision = precision, n_draws = n_draws)
     
     # REPLACE deltas 
     problem.data[!,"delta"] .= deltas;
@@ -28,9 +31,9 @@ function replace_xi_contraction!(problem::FRACProblem)
     for l ∈ problem.linear
         xi = xi - problem.estimated_parameters[Symbol("β_$(l)")].* problem.data[!,l];
     end
-    for nl ∈ problem.nonlinear
-        xi = xi - sqrt(max(0, problem.estimated_parameters[Symbol("σ2_$(nl)")])) .* problem.data[!,"K_$(nl)"];
-    end
+    # for nl ∈ problem.nonlinear
+    #     xi = xi - sqrt(max(0, problem.estimated_parameters[Symbol("σ2_$(nl)")])) .* problem.data[!,"K_$(nl)"];
+    # end
     
     # ADD xi
     problem.data[!,"xi_contraction"] .= xi;
@@ -43,24 +46,24 @@ function replace_xi_contraction!(problem::FRACProblem)
             fe_terms += fe(Symbol(problem.fe_names[i]));
         end
     end
+
     # Calculate fixed effects
     results = reg(problem.data, term(:xi_contraction) ~ fe_terms, 
         save = :all, 
         double_precision = false, 
         drop_singletons = problem.drop_singletons);
     estimated_FEs = fe(results);
+    
     for f ∈ problem.fe_names
         problem.data[:,"estimatedFE_$(f)"] .= estimated_FEs[!,findfirst(problem.fe_names .== f)];
+        problem.data[!,"xi_contraction"] = problem.data[!,"xi_contraction"] .- problem.data[!,"estimatedFE_$(f)"];
     end   
 
-    # Subtract all fixed effects from xi
-    for f ∈ problem.fe_names
-        problem.data[!,"xi_contraction"] = problem.data[!,"xi_contraction"] .- problem.data[!,"estimatedFE_$(f)"];
-    end
     # REPLACE xi
-    problem.data[!,"xi"] = problem.data[!,"xi_contraction"];
+    problem.data[!,"xi"] = residuals(results) #problem.data[!,"xi_contraction"];
 end
 
+#ORIGINAL
 function shares_from_deltas(deltas, data::DataFrame; 
     seed = 10293, monte_carlo_draws = 50, 
     raw_draws = [], return_individual_shares = false,
@@ -68,37 +71,59 @@ function shares_from_deltas(deltas, data::DataFrame;
     results = [], by_var = "")
 
     I = monte_carlo_draws;
+    n_obs = nrow(data)
+    K = length(nonlinear_vars)
 
     # Simulate draws for random coefficients
     eta_i = zeros(Float64, size(data,1),1);
     u_i = zeros(Float64, size(data,1),1);
     alpha_i = zeros(Float64, size(data,1),I);
-
+    
     # Currently a loop over number of simulated customers for a reason I don't remember -- old code, should update to matrix 
-    for i = 1:I
-        eta_i = zeros(Float64, size(data,1),1);
-        for nl ∈ nonlinear_vars
-            sigma = sqrt(max(results[Symbol("σ2_$(nl)")], 0)); # Drop heterogeneity if estimates are negative
-            k = findfirst(nonlinear_vars .== nl)
-            scaled_draws = sigma .* raw_draws[k][:,i];
-            eta_i = eta_i .+ data[!,nl] .* scaled_draws;
-        end
-        u_i = hcat(u_i, deltas + eta_i);
-    end
+    # for i = 1:I
+    #     eta_i = zeros(Float64, size(data,1),1);
+    #     for nl ∈ nonlinear_vars
+    #         sigma = sqrt(max(results[Symbol("σ2_$(nl)")], 0)); # Drop heterogeneity if estimates are negative
+    #         k = findfirst(nonlinear_vars .== nl)
+    #         scaled_draws = sigma .* raw_draws[k][:,i];
+    #         eta_i = eta_i .+ data[!,nl] .* scaled_draws;
+    #     end
+    #     u_i = hcat(u_i, deltas + eta_i);
+    # end
+     # 1) Preallocate U = [const | δ + η] (n_obs × (I+1))
+     U = zeros(Float64, n_obs, I+1)
+     U[:, 2:end] .+= deltas  # put δ in every simulation column
+ 
+     # 2) Add each random‐coef term: U[:,2:end] .+= σ_k * X_k .* raw_draws[k]
+     @inbounds for (k, nl) in enumerate(nonlinear_vars)
+         σk = sqrt(max(results[Symbol("σ2_$(nl)")], 0))
+         # raw_draws[k] is n_obs×I, data[!,nl] is n_obs‐vector
+         U[:, 2:end] .+= data[!, nl] .* (σk .* raw_draws[k])
+     end
+ 
+     # 3) exponentiate and drop the “const” column
+     u_i = exp.(U[:, 2:end])  # now n_obs×I
 
     # Exponentiate individual utilities for market share calculation and add market_ids column
-    u_i = exp.(u_i[:,2:end]);
+    # u_i = exp.(u_i[:,2:end]);
     u_i = DataFrame(u_i, :auto);
     u_i[!,"market_ids"] = data.market_ids;
+    u_i[!,"product_ids"] = data.product_ids;
 
     # Calculate market-level sums of exp(u)
     gdf = groupby(u_i, :market_ids);
     cdf = combine(gdf, names(u_i) .=> sum);
     cdf = select(cdf, Not(:market_ids_sum));
-
-    # Make a DataFrame with only market-level sums of exp(u)
-    u_sums = innerjoin(select(u_i, :market_ids), cdf, on = :market_ids);
-
+    u_sums = innerjoin(
+        select(u_i, :market_ids), 
+        cdf, on = :market_ids);
+    # u_i = transform(gdf,
+    #     names(u_i, r"x") .=> (s -> sum(s)) .=> names(u_i, r"x")
+    #     )
+    # shares_i = Matrix(u_i[!, r"x"]) ./ (1 .+ Matrix(u_i[!, r"x"])) 
+    
+    sort!(u_i, [:market_ids, :product_ids])
+    sort!(u_sums, [:market_ids])
     shares_i = Matrix(u_i[!,r"x"])./ Matrix(1 .+ u_sums[!,r"x"]);
     if return_individual_shares
         shares_i
@@ -109,19 +134,44 @@ function shares_from_deltas(deltas, data::DataFrame;
     end
 end
 
-function run_contraction_mapping(initial_deltas, problem::FRACProblem)
+function run_contraction_mapping(initial_deltas, 
+    problem::FRACProblem; 
+    precision = 1e-12, 
+    n_draws = 50, 
+    verbose = true)
+
+    I = n_draws;
     copyproblem = deepcopy(problem);
     delta_next = initial_deltas;
     delta_old = initial_deltas .+ 1;
-    I =20
-    raw_draws = make_draws(problem.data, I, length(problem.nonlinear))
-    while maximum(abs.(delta_next .- delta_old)) > 1e-12
-        delta_old .= delta_next;
-        delta_next .= delta_old .+ log.(problem.data.shares) .- 
-                log.(shares_from_deltas(delta_old, copyproblem.data, monte_carlo_draws=I, 
-                raw_draws = raw_draws, linear_vars = problem.linear, nonlinear_vars = problem.nonlinear, results = problem.estimated_parameters, by_var = problem.by_var));
-        # @show maximum(abs.(problem.data.shares .- shares_from_deltas(delta_old, copyproblem)))
+
+    raw_draws = make_draws(problem.data, I, length(problem.nonlinear), 
+        method = :normal, common_draws = true, antithetic = true)
+    if problem.cov != []
+        raw_draws = correlate_draws(raw_draws, problem.data, problem.nonlinear, problem.cov, problem.estimated_parameters)
     end
+    println("Running contraction mapping...")
+    println("Target precision: $(round(precision, sigdigits = 2))")
+    while maximum(abs.(delta_next .- delta_old)) > precision
+        delta_old .= delta_next;
+        delta_next .= delta_old .+ 
+                log.(problem.data.shares) .- 
+                log.(shares_from_deltas(delta_old, 
+                    copyproblem.data, 
+                    monte_carlo_draws=I, 
+                    raw_draws = raw_draws, 
+                    # linear_vars = problem.linear, 
+                    nonlinear_vars = problem.nonlinear, 
+                    results = problem.estimated_parameters
+                    # by_var = problem.by_var
+                    ));
+                    # for i in 1:100
+                    #     pct = round(i/100*100; digits=1)
+                gap = round(max(maximum(abs.(delta_next .- delta_old))), sigdigits = 2)
+                print("\rContraction Gap: $(gap)")
+                flush(stdout)
+    end
+    println("")
     return delta_next
 end
 
@@ -151,8 +201,15 @@ function shares_for_bootstrap(problem, xi_boot; I=50, save_mem = true, raw_draws
         deltas = deltas .+ data[!,"estimatedFE_$(f)"];
     end
     
-    shares = shares_from_deltas(deltas, problem.data, monte_carlo_draws = I, raw_draws = raw_draws, 
-        linear_vars = linear_vars, nonlinear_vars = nonlinear_vars, results = results, by_var = problem.by_var);
+    shares = shares_from_deltas(
+        deltas, 
+        data, 
+        monte_carlo_draws = size(raw_draws[1],2), 
+        raw_draws = raw_draws, 
+        linear_vars = linear_vars, 
+        nonlinear_vars = nonlinear_vars, 
+        results = results, 
+        by_var = problem.by_var);
     
     return shares
 end
@@ -178,21 +235,25 @@ bootstrapped parameters (a vector of dictionaries including all bootstrap) to th
 
 where β is the original estimate and β^b is the estimate from the bth bootstrap sample.
 """
-function bootstrap!(problem::FRACProblem; nboot = 100, ndraws = 100, approximate = false)
-    # data_copy = deepcopy(problem.data);
-    # linear = problem.linear;
-    # nonlinear = problem.nonlinear;
-    # results = problem.results;
+function bootstrap!(problem::FRACProblem; 
+    nboot = 100, 
+    ndraws = 100, 
+    approximate = false, 
+    precision = 1e-12)
 
     if approximate == false 
-        replace_xi_contraction!(problem)
+        replace_xi_contraction!(problem, precision = precision, n_draws = ndraws)
     end
 
     # Get xi from original problem, to be resampled
     estimated_xi = problem.data.xi;
 
     # Make monte carlow draws -- note: this sets the seed
-    raw_draws = make_draws(problem.data, ndraws, length(problem.nonlinear))
+    raw_draws = make_draws(
+        problem.data, 
+        ndraws, 
+        length(problem.nonlinear), 
+        method = :normal, common_draws = true, antithetic = true)
 
     if problem.by_var == ""
         boot_results = [];
@@ -205,13 +266,15 @@ function bootstrap!(problem::FRACProblem; nboot = 100, ndraws = 100, approximate
             problem_boot = define_problem(data = select(copydata, Not(:xi)), 
                     linear = problem.linear, 
                     nonlinear = problem.nonlinear,
-                    # by_var = problem.by_var, 
                     fixed_effects = problem.fe_names,
                     se_type = problem.se_type, 
                     constrained = problem.constrained);
             estimate!(problem_boot)
             push!(boot_results, problem_boot.estimated_parameters)
+            
+            # Clean up memory
             problem_boot= nothing;
+            copydata = nothing;
             GC.gc()
         end
         # Loop over each results and calcluate the average among bootstrapped samples
@@ -240,7 +303,7 @@ function bootstrap!(problem::FRACProblem; nboot = 100, ndraws = 100, approximate
 end
 
 function make_draws(data::DataFrame, I::Int, K::Int; seed::Integer = 10293,
-                     method::Symbol = :normal, antithetic::Bool = false,
+                     method::Symbol = :normal, antithetic::Bool = true,
                      common_draws::Bool = false, skip::Integer = 500)
     # Prepare RNG
     rs = MersenneTwister(seed)
@@ -264,10 +327,29 @@ function make_draws(data::DataFrame, I::Int, K::Int; seed::Integer = 10293,
                     base = randn(rs, I)
                 end
             elseif method == :halton
-                # use Halton sequence with prime-based base
-                base_seq = Vector{Float64}(undef, I)
-                HaltonDraws!(base_seq, prime(k+1); skip = skip, distr = Normal())
-                base = base_seq
+                 # 1) Generate one (I×K) Halton in [0,1]^K
+                sampler = HaltonSample()
+                H = Matrix(QuasiMonteCarlo.sample(I, K, sampler)')
+                # 2) map each column to N(0,1)
+                Z = [quantile.(Normal(), H[:, k]) for k in 1:K]  # Vector of length-K each size I
+                # 3) build per-market draws
+                for k in 1:K
+                    base = Z[k]'                              # 1×I row vector
+                    if common_draws
+                        rand_draws = repeat(base, n_markets, 1) # same for all markets
+                    else
+                        # # different for each market? tile the same row for now
+                        # rand_draws = repeat(base, n_markets, 1)
+                        @warn "common_draws is false, but Halton draws are common"
+                    end
+                    # expand market→obs
+                    M = zeros(n_obs, I)
+                    for (mi, m) in enumerate(markets)
+                        mask = data.market_ids .== m
+                        M[mask, :] .= repeat(rand_draws[mi, :]', sum(mask), 1)
+                    end
+                    store_draws[k] = M
+                end
             else
                 error("Unknown draw method: $(method)")
             end

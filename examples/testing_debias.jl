@@ -9,13 +9,13 @@ T = 1000; # number of markets/2
 J1 = 2; # number of products in half of markets
 J2 = 4; # number of products in the other half of markets
 
-nboot = 5; # Number of bootstrap iterations. Use a larger number in actual usage
+nboot = 30; # Number of bootstrap iterations. Use a larger number in actual usage
  
 original_estimates = []
 debias_estimates = []
-for i = 1:25
+for i = 1:50
     mean_utility_params = [-1 1];
-    random_coefficient_sd = [0.3 0.3];
+    random_coefficient_sd = [0.3 0.0; 0.0 0.3];
     df = FRACDemand.sim_logit_vary_J(J1, J2, T, 1, mean_utility_params, random_coefficient_sd, 0.3, with_market_FEs = true);
 
     problem = define_problem(data = df, 
@@ -44,8 +44,13 @@ display(original_avg_dict)
 println("Average of Debiased Estimates")
 display(debiased_avg_dict)
 
-name = :β_prices
+param_name = :σ2_prices
 histogram([debias_estimates[j][name] for j ∈ 1:length(debias_estimates)],
-    label = "debiased", normalize = :probability)
+    label = "debiased", 
+    normalize = :pdf, 
+    alpha = 0.5, 
+    xlabel = string("Estimated", param_name))
 histogram!([original_estimates[j][name] for j ∈ 1:length(original_estimates)], 
-    label = "original", normalize = :probability)
+    label = "original", normalize = :pdf, alpha = 0.5)
+# show truth as vline 
+vline!([0.3], color = :black, linestyle = :dash, linewidth = 3, label = "truth")

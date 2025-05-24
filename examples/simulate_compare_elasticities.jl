@@ -5,8 +5,8 @@ using Statistics
 nsim = 1000
 J1, J2, T, B = 20, 20, 500, 1
 β = [-2.0, 1.5]
-Σ = [0.5 0.3; 0.3 0.8]
-ξ_var = 0.3
+Σ = [0.1 0.0; 0.0 0.1]
+ξ_var = 0.5
 
 # storage for all elasticity pairs
 all_elast = DataFrame(mse=Float64[], mape=Float64[], 
@@ -19,15 +19,23 @@ for s in 1:nsim
     Random.seed!(s)
     # simulate and reshape
     df = FRACDemand.sim_logit_vary_J(J1, J2, T, B, β, Σ, ξ_var)
+    df[df.market_ids .>= T,"product_ids"] .+=  J1-2
+    sort!(df, [:market_ids, :product_ids])
     df[!,"demand_instruments3"] .= df.demand_instruments0 .* df.demand_instruments1 .* df.demand_instruments2
-
+    original_xi = df.xi
+    original_delta = df.xi .+ df.prices * β[1] + df.x * β[2] 
+    df[!,"xi"] .= original_xi
+    
+    scatter(
+        problem.data.shares, df.shares
+    )
     # set up IV and estimate
     problem = define_problem(
       data          = df,
       linear        = ["prices","x"],
       nonlinear     = ["prices","x"],
       cov           = [("prices","x")],
-      fixed_effects = ["product_ids"],
+      fixed_effects = ["product_ids", "market_ids"],
       se_type       = "bootstrap",
       constrained   = false
     )
