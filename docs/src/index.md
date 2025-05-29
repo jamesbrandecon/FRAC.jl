@@ -1,6 +1,15 @@
-# FRACDemand.jl
-
+# FRACDemand
 [![Documentation](https://img.shields.io/badge/docs-latest-blue)](https://jamesbrand.github.io/FRACDemand.jl/)
+
+> **Note:** This documentation is new and has been prepared with a lot of help from LLMs, so apologies for errors and omissions. If you find any, please open an issue on GitHub or submit a pull request.
+
+FRACDemand is a Julia package for estimating random-coefficients demand models (BLP-style) using a fixed-rank approximation of contraction mappings. It provides:
+
+- Flexible specification of utility function in mixed logit models
+- Fixed effects and robust standard errors  
+- Bootstrap debiasing and Monte Carlo elasticity computations  
+- Price elasticities and predicted market shares
+- Easy exporting to PyBLP
 
 This package is meant to make the estimation of mixed logit models (with market level data) and the resulting price elasticities trivially easy. The package estimates an approximation of these models which was developed by [Salanie and Wolak (2022)](https://economics.sas.upenn.edu/system/files/2022-04/Econometrics%2004112022.pdf).
 
@@ -15,11 +24,17 @@ Dict{Any, Any} with 4 entries:
   :σ2_prices => 0.0839573
 ```
 
+## Quickstart
+
+- Installation: `] add FRACDemand`  
+- API Reference: `docs/src/api.md`  
+- Usage Examples: `docs/src/usage.md` and `docs/src/examples.md`
+
 ## Installation
 
 ```julia
 # From the REPL:
-] add FRAC
+] add FRACDemand
 ```
 
 ## Quick Start
@@ -62,13 +77,15 @@ own_df = own_elasticities(problem)
 - 📚 [Theory](theory.md)   
 
 ## Passing results to PyBLP
-You should be able to save the results as a .csv file using the CSV package. The results can then be loaded in python and passed directly to PyBLP. The only caveat is that my understanding is that people don't like to use unicode characters in python as much as is done in Julia, so you may want to rename the results. An example workflow below:  
+Results can be saved to CSV and used in Python for PyBLP. Note that Python may not handle Unicode dictionary keys; you may want to rename entries. Example:
+
 Save results in Julia:
 ```julia
-frac_results = problem.estimated_parameters;
-# .... rename dictionary entries as desired
+frac_results = problem.estimated_parameters
+# ... rename keys if needed ...
 CSV.write("frac_results.csv", frac_results)
 ```
+
 Load in Python:
 ```python
 import pyblp 

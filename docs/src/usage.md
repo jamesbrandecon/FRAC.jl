@@ -1,11 +1,17 @@
-# Usage Example
+# Getting Started with FRACDemand
 
-This page shows a minimal end‑to‑end workflow. For extended demos, see `examples/`.
+FRACDemand provides tools to estimate random-coefficients demand models via a fixed-rank contraction approximation. Below is a basic workflow; for detailed demos see `examples/`.
+
+## 0. Installation
+
+```julia
+] add FRACDemand
+```
 
 ## 1. Simulate synthetic demand
 
 ```julia
-using FRAC, Random, DataFrames, Plots
+using FRACDemand, Random, DataFrames, Plots
 
 df = sim_logit_vary_J(
   2, 4,                 # min and max products per market
