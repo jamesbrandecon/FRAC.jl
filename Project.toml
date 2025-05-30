@@ -1,7 +1,7 @@
 name = "FRACDemand"
 uuid = "876e2209-f438-4469-a9ec-3c471b9a3293"
 authors = ["James Brand <jamesbrandecon@gmail.com>"]
-version = "0.1.2"
+version = "0.1.1"
 
 [deps]
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
@@ -32,6 +32,8 @@ Primes = "0.5.6"
 ProgressMeter = "1.10.2"
 Suppressor = "0.2.8"
 julia = "1.8, 1.10"
+QuasiMonteCarlo = "0.3.0"
+StatsBase = "0.34.0"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
